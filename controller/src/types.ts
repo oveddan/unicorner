@@ -69,3 +69,21 @@ export type SetMessage = {
   path: string
   value: number | boolean
 }
+
+export type SurfaceParamType = 'float' | 'int' | 'bool' | 'pulse'
+
+export type SurfaceParam = {
+  name: string
+  label: string
+  type: SurfaceParamType
+  min?: number
+  max?: number
+  default?: number | boolean
+}
+
+export type SchemaMessage = {
+  type: 'schema'
+  params: SurfaceParam[]
+}
+
+export type InboundMessage = SchemaMessage

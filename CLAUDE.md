@@ -115,6 +115,37 @@ TD writes a numbered backup each save by default. Disable: `Edit → Preferences
 
 Stored relative paths inside a .toe resolve against whatever directory the file currently sits in. Switching between a git worktree and the main checkout leaves multiple valid resolutions of the same path and TD gets confused. Use the main checkout for any work that touches `td/main.toe`.
 
+## Reusable scripts: build, improve, document
+
+**The pattern: don't inline-exec the same TD operation twice.** The first time we do a non-trivial operation through `mcp__touchdesigner-stdio__execute_python_script`, save it as a parameterized script under `poc/N-*/` and feed *its body* to MCP next time. Inline exec is fine for one-off introspection; the moment we'd consider re-running an operation, it belongs in a script.
+
+The convention (see [poc/1-mcp-scaffold/scaffold.py](poc/1-mcp-scaffold/scaffold.py), [poc/2-catalog/extract.py](poc/2-catalog/extract.py), [poc/6-controller-surface/scaffold.py](poc/6-controller-surface/scaffold.py)):
+
+```python
+"""
+What this does, when to run it, what it depends on.
+"""
+
+# ----- Config (edit per scene) -----
+PARAMS   = [...]
+BINDINGS = [...]
+
+# ----- Body fed to TD via MCP -----
+BODY = r'''
+... TD-side Python that consumes the config above ...
+'''
+
+if __name__ == '__main__':
+    print(BODY)  # render for piping / inspection
+```
+
+**When we learn something doing this work** — a new gotcha, a new pattern, an undocumented constraint — improve in two places:
+
+1. The script's comments and defaults, so the next person running it sees the lesson in context.
+2. The "TD gotchas learned the hard way" section above, so cross-script lessons accumulate centrally.
+
+Scripts compound. A one-off inline exec is throwaway; a saved script is an asset that gets sharper each time we run it. Bias toward saving and improving rather than redoing.
+
 ## Repository layout
 
 | Path | Purpose |
@@ -124,7 +155,7 @@ Stored relative paths inside a .toe resolve against whatever directory the file 
 | `td/` | TouchDesigner project (`main.toe` lives here, gitignored is its auto-backups) |
 | `vendor/` | Gitignored. Populated by `scripts/setup-td-mcp.sh`. |
 | `scripts/` | Setup + helper scripts |
-| `poc/` | Numbered proof-of-concepts, riskiest tech first. See sub-plan. |
+| `poc/` | Numbered proof-of-concepts (riskiest tech first) and reusable scripts (e.g. [poc/6-controller-surface/](poc/6-controller-surface/)). See sub-plan. |
 | `docs/` | Project docs, including [touchdesigner-mcp-setup.md](docs/touchdesigner-mcp-setup.md) (deep-dive for the dev workflow) |
 
 ## Pointers for Claude
