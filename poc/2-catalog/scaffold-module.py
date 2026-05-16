@@ -29,23 +29,29 @@ mod.tags.add(TAG)
 
 page = mod.appendCustomPage('Controls')
 
+# NB: TD numeric Pars have two ranges.
+#   normMin/normMax  → slider/UI range
+#   min/max          → hard validation range (what clampMin/clampMax check)
+# Setting only normMin/normMax leaves min/max at the default [0, 1]. With
+# clamping on, any write outside [0, 1] then silently snaps. Always set both.
+
 p = page.appendFloat('Intensity', label='Intensity')[0]
-p.default = 0.5;   p.normMin = 0.0; p.normMax = 1.0;   p.clampMin = True; p.clampMax = True; p.val = 0.5
+p.default = 0.5;   p.min = 0.0; p.max = 1.0;   p.normMin = 0.0; p.normMax = 1.0;   p.clampMin = True; p.clampMax = True; p.val = 0.5
 
 p = page.appendFloat('Colorhue',  label='Color Hue')[0]
-p.default = 200.0; p.normMin = 0.0; p.normMax = 360.0; p.clampMin = True; p.clampMax = True; p.val = 200.0
+p.default = 200.0; p.min = 0.0; p.max = 360.0; p.normMin = 0.0; p.normMax = 360.0; p.clampMin = True; p.clampMax = True; p.val = 200.0
 
 p = page.appendFloat('Scale',     label='Scale')[0]
-p.default = 1.0;   p.normMin = 0.1; p.normMax = 10.0;  p.clampMin = True; p.clampMax = True; p.val = 1.0
+p.default = 1.0;   p.min = 0.1; p.max = 10.0;  p.normMin = 0.1; p.normMax = 10.0;  p.clampMin = True; p.clampMax = True; p.val = 1.0
 
 p = page.appendFloat('Speed',     label='Speed')[0]
-p.default = 1.0;   p.normMin = 0.0; p.normMax = 2.0;   p.clampMin = True; p.clampMax = True; p.val = 1.0
+p.default = 1.0;   p.min = 0.0; p.max = 2.0;   p.normMin = 0.0; p.normMax = 2.0;   p.clampMin = True; p.clampMax = True; p.val = 1.0
 
 p = page.appendToggle('Active',   label='Active')[0]
 p.default = True;  p.val = True
 
 # Cheap verification — read back what we wrote
-[(pr.name, pr.style, pr.default, pr.normMin, pr.normMax) for pr in mod.customPars]
+[(pr.name, pr.style, pr.default, pr.min, pr.max, pr.normMin, pr.normMax) for pr in mod.customPars]
 '''
 
 if __name__ == '__main__':

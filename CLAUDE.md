@@ -84,6 +84,37 @@ You shouldn't need to for v1. If you do (working on the MCP server itself, not U
 - TypeScript changes (`src/`): rerun `npm run build` in the touchdesigner-mcp repo, reconnect MCP client (`/mcp` in Claude Code).
 - Python changes (`td/modules/`): full TD restart. TD caches imported modules; `td/import_modules.py` has a softer reload but a restart is the simplest reliable clear.
 
+## TD gotchas learned the hard way
+
+### Custom-param writes silently snap to [0, 1]
+
+TD numeric Pars have **two** ranges:
+
+| Field | Purpose |
+|---|---|
+| `normMin` / `normMax` | Slider / UI range (the soft range a knob sweeps over) |
+| `min` / `max` | Hard validation range — what `clampMin` / `clampMax` enforce |
+
+If you set only `normMin` / `normMax` and turn `clampMin` / `clampMax = True` on, every write outside the **default** `[0, 1]` silently snaps. Symptom: WS writes appear to succeed, the param "doesn't move." Fix: set both ranges, or leave clamping off. See [`poc/2-catalog/scaffold-module.py`](poc/2-catalog/scaffold-module.py) for the canonical pattern.
+
+### `execute_python_script` sometimes drops the return value
+
+The MCP tool returns the last expression of the script verbatim — *except* when the script is "too long" or contains `def` blocks plus several statements. In those cases the side effects all happen, but the return comes back as `null`. Workarounds:
+- Use `detailLevel: "detailed"` always — short scripts then reliably round-trip.
+- For longer scripts: don't depend on the return value; follow up with a small read script that just evaluates one expression.
+
+### `project.name` gets stuck after `project.save("/new/path.toe")`
+
+After saving to a new path, TD updates `project.folder` but `project.name` stays on the *next* backup name (e.g. `main.1.toe`) — even when no such file exists. If you then `Cmd+S`, TD writes to that name and the file you meant to update stays stale. Fix: `File → Open` the .toe explicitly to reset `project.name`.
+
+### Backup `.N.toe` files proliferate on every save
+
+TD writes a numbered backup each save by default. Disable: `Edit → Preferences → File → "Number of Backup Files To Keep On Save"` → set to `0`. The repo's `.gitignore` already excludes `*.[0-9].toe` and `*.[0-9][0-9].toe` either way.
+
+### Don't work inside a worktree if the .toe is involved
+
+Stored relative paths inside a .toe resolve against whatever directory the file currently sits in. Switching between a git worktree and the main checkout leaves multiple valid resolutions of the same path and TD gets confused. Use the main checkout for any work that touches `td/main.toe`.
+
 ## Repository layout
 
 | Path | Purpose |
