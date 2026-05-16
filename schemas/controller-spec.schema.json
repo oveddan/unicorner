@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unicorner.dev/schemas/controller-spec.schema.json",
+  "title": "Controller Spec",
+  "description": "AI generator output. Describes an opinionated control surface for a scene's parameter catalog. The renderer turns this into a live UI; control inputs write back to TD via the WebSocket DAT.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scene_id", "controls"],
+  "properties": {
+    "schema_version": {
+      "const": "0.1",
+      "description": "Bump on incompatible changes."
+    },
+    "scene_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Matches the catalog the spec was generated from."
+    },
+    "rationale": {
+      "type": "string",
+      "description": "Free-text: why this layout. Useful for debugging the prompt; not rendered."
+    },
+    "controls": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "description": "Hard cap of 12 — 'no thinking' thesis breaks at more.",
+      "items": { "$ref": "#/$defs/control" }
+    },
+    "layout": {
+      "type": "array",
+      "description": "Optional 2D layout: array of rows, each row an array of control ids. Renderer falls back to a flat grid if absent.",
+      "items": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Stable id, snake_case. Referenced by `layout`."
+        },
+        "type": {
+          "enum": ["knob", "slider", "toggle", "button", "macro"],
+          "description": "knob/slider for floats. toggle for bool. button for pulse. macro modulates multiple params with a single input."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable name shown on the control."
+        },
+        "bind": {
+          "$ref": "#/$defs/binding",
+          "description": "Required for knob/slider/toggle/button. Forbidden for macro (use `macro_bindings` instead)."
+        },
+        "macro_bindings": {
+          "type": "array",
+          "minItems": 2,
+          "description": "Required for macro. List of params modulated by this control's 0..1 input.",
+          "items": { "$ref": "#/$defs/macro_binding" }
+        }
+      },
+      "allOf": [
+        {
+          "if":   { "properties": { "type": { "enum": ["knob", "slider", "toggle", "button"] } } },
+          "then": { "required": ["bind"], "not": { "required": ["macro_bindings"] } }
+        },
+        {
+          "if":   { "properties": { "type": { "const": "macro" } } },
+          "then": { "required": ["macro_bindings"], "not": { "required": ["bind"] } }
+        }
+      ]
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "param_type"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/.+",
+          "description": "Must match a parameter `path` in the catalog the spec was generated from."
+        },
+        "param_type": {
+          "enum": ["float", "int", "bool", "pulse"],
+          "description": "Echoed from the catalog. Renderer uses this to coerce the outgoing value."
+        },
+        "min": {
+          "type": "number",
+          "description": "Optional override of the catalog range (e.g. softer slider). Must stay within the catalog's hard range."
+        },
+        "max": { "type": "number" },
+        "curve": {
+          "enum": ["linear", "log", "exp"],
+          "default": "linear",
+          "description": "Maps the control's 0..1 input to the param range. exp for things like intensity/loudness where small movement at low values matters more."
+        }
+      }
+    },
+    "macro_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "param_type", "from", "to"],
+      "description": "One leg of a macro: as the macro input goes 0..1, this param sweeps from `from` to `to`.",
+      "properties": {
+        "path":       { "type": "string", "pattern": "^/.+" },
+        "param_type": { "enum": ["float", "int"] },
+        "from":       { "type": "number" },
+        "to":         { "type": "number" },
+        "curve":      { "enum": ["linear", "log", "exp"], "default": "linear" }
+      }
+    }
+  }
+}
