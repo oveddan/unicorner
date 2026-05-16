@@ -1,0 +1,94 @@
+{
+  "schema_version": "0.1",
+  "scene_id": "a",
+  "rationale": "container1 owns the visual (ramp driven by external CHOP signal); module_a is the secondary look layer. Period gets a knob because it controls the gradient's repeat rate — direct, expressive, and the only param that visibly changes the ramp on its own. Hue is a knob (color choice). 'Push' macro bundles the two intensity-shaped params (Intensity + Scale) plus the modulation-scaling Speed, so the DJ has one lever for energy. Activation toggle goes last.",
+  "controls": [
+    {
+      "id": "intensity",
+      "type": "knob",
+      "label": "Intensity",
+      "bind": {
+        "path": "/project1/module_a/Intensity",
+        "param_type": "float",
+        "min": 0,
+        "max": 1,
+        "curve": "exp"
+      }
+    },
+    {
+      "id": "hue",
+      "type": "knob",
+      "label": "Hue",
+      "bind": {
+        "path": "/project1/module_a/Colorhue",
+        "param_type": "float",
+        "min": 0,
+        "max": 360,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "period",
+      "type": "knob",
+      "label": "Period",
+      "bind": {
+        "path": "/project1/container1/Period",
+        "param_type": "float",
+        "min": 0.1,
+        "max": 4,
+        "curve": "linear"
+      }
+    },
+    {
+      "id": "push",
+      "type": "macro",
+      "label": "Push",
+      "macro_bindings": [
+        {
+          "path": "/project1/module_a/Intensity",
+          "param_type": "float",
+          "from": 0.3,
+          "to": 1.0,
+          "curve": "exp"
+        },
+        {
+          "path": "/project1/module_a/Scale",
+          "param_type": "float",
+          "from": 1.0,
+          "to": 3.5,
+          "curve": "linear"
+        },
+        {
+          "path": "/project1/container1/Speed",
+          "param_type": "float",
+          "from": 1.0,
+          "to": 3.0,
+          "curve": "linear"
+        }
+      ]
+    },
+    {
+      "id": "module_a_active",
+      "type": "toggle",
+      "label": "Layer A on",
+      "bind": {
+        "path": "/project1/module_a/Active",
+        "param_type": "bool"
+      }
+    },
+    {
+      "id": "container1_active",
+      "type": "toggle",
+      "label": "Ramp on",
+      "bind": {
+        "path": "/project1/container1/Active",
+        "param_type": "bool"
+      }
+    }
+  ],
+  "layout": [
+    ["intensity", "hue", "period"],
+    ["push"],
+    ["module_a_active", "container1_active"]
+  ]
+}

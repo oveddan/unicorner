@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>POC 0 — TD WebSocket round-trip</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        background: #111;
+        color: #eee;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .card {
+        width: min(420px, 100%);
+        background: #1c1c1c;
+        border: 1px solid #2a2a2a;
+        border-radius: 16px;
+        padding: 24px;
+        display: grid;
+        gap: 20px;
+      }
+      h1 { margin: 0; font-size: 18px; font-weight: 600; }
+      .row { display: grid; gap: 8px; }
+      label { font-size: 12px; opacity: 0.7; }
+      input[type="text"], input[type="range"] {
+        width: 100%;
+        accent-color: #6cf;
+        font-size: 16px;
+        padding: 8px;
+        background: #2a2a2a;
+        border: 1px solid #333;
+        border-radius: 8px;
+        color: inherit;
+      }
+      input[type="range"] { padding: 0; }
+      .status {
+        font-size: 12px;
+        font-family: ui-monospace, monospace;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: #2a2a2a;
+      }
+      .status.ok    { color: #6f6; }
+      .status.err   { color: #f66; }
+      .status.idle  { color: #aaa; }
+      .value { font-variant-numeric: tabular-nums; opacity: 0.8; font-size: 12px; }
+      button {
+        background: #6cf;
+        color: #000;
+        border: 0;
+        padding: 10px 14px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 14px;
+      }
+      pre { margin: 0; font-size: 11px; opacity: 0.6; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>POC 0 — TD WebSocket round-trip</h1>
+
+      <div class="row">
+        <label for="url">TD WebSocket URL</label>
+        <input id="url" type="text" value="ws://127.0.0.1:9980" />
+        <button id="connect">Connect</button>
+        <div id="status" class="status idle">disconnected</div>
+      </div>
+
+      <div class="row">
+        <label for="path">Param path</label>
+        <input id="path" type="text" value="/project1/poc0_target/value0" />
+      </div>
+
+      <div class="row">
+        <label for="slider">Value <span id="value" class="value">0.50</span></label>
+        <input id="slider" type="range" min="0" max="1" step="0.001" value="0.5" />
+      </div>
+
+      <pre id="log"></pre>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const urlEl = $("url");
+      const pathEl = $("path");
+      const sliderEl = $("slider");
+      const valueEl = $("value");
+      const statusEl = $("status");
+      const logEl = $("log");
+      const connectBtn = $("connect");
+
+      let ws = null;
+
+      function setStatus(text, cls) {
+        statusEl.textContent = text;
+        statusEl.className = `status ${cls}`;
+      }
+
+      function log(line) {
+        const ts = new Date().toISOString().slice(11, 23);
+        logEl.textContent = `${ts}  ${line}\n` + logEl.textContent.split("\n").slice(0, 20).join("\n");
+      }
+
+      function connect() {
+        if (ws) { try { ws.close(); } catch {} }
+        const url = urlEl.value.trim();
+        setStatus(`connecting ${url}…`, "idle");
+        ws = new WebSocket(url);
+        ws.onopen    = () => { setStatus(`connected ${url}`, "ok");  log(`open ${url}`); };
+        ws.onclose   = (e) => { setStatus(`closed (${e.code})`, "err"); log(`close ${e.code} ${e.reason || ""}`); };
+        ws.onerror   = ()  => { setStatus("error",              "err"); log("error"); };
+        ws.onmessage = (e) => { log(`recv ${e.data}`); };
+      }
+
+      function send(value) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const msg = { type: "set", path: pathEl.value.trim(), value };
+        ws.send(JSON.stringify(msg));
+        log(`send ${JSON.stringify(msg)}`);
+      }
+
+      connectBtn.addEventListener("click", connect);
+
+      sliderEl.addEventListener("input", () => {
+        const v = parseFloat(sliderEl.value);
+        valueEl.textContent = v.toFixed(2);
+        send(v);
+      });
+    </script>
+  </body>
+</html>
