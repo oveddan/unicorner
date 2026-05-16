@@ -5,6 +5,8 @@ import { Toggle } from './widgets/Toggle'
 import { Unsupported } from './widgets/Unsupported'
 import { useTDSocket } from './transport/ws'
 import { SendContext } from './transport/context'
+import { MidiMonitor } from './MidiMonitor'
+import { MidiLearnModal } from './MidiLearnModal'
 
 function renderControl(control: Control) {
   switch (control.type) {
@@ -41,6 +43,7 @@ function ControlsGrid({ spec }: { spec: ControllerSpec }) {
 export default function App() {
   const [spec, setSpec] = useState<ControllerSpec | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [learnOpen, setLearnOpen] = useState(false)
   const { status, send } = useTDSocket()
 
   useEffect(() => {
@@ -60,10 +63,15 @@ export default function App() {
           <h1>Unicorner Controller</h1>
           <div className="scene">scene: {spec?.scene_id ?? '…'}</div>
           <div className={`wsbadge wsbadge-${status}`}>td: {status}</div>
+          <button className="new-midi-btn" onClick={() => setLearnOpen(true)} disabled={!spec}>
+            + New MIDI Connection
+          </button>
         </header>
         {error && <div className="error">Failed to load spec: {error}</div>}
         {!error && !spec && <div className="loading">Loading…</div>}
         {spec && <ControlsGrid spec={spec} />}
+        <MidiMonitor />
+        {learnOpen && spec && <MidiLearnModal spec={spec} onClose={() => setLearnOpen(false)} />}
       </div>
     </SendContext>
   )
