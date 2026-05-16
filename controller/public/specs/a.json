@@ -8,7 +8,7 @@
       "type": "knob",
       "label": "Position",
       "bind": {
-        "path": "/project1/controls/const0value",
+        "path": "/project1/constant1/value0",
         "param_type": "float",
         "min": 0,
         "max": 1,
