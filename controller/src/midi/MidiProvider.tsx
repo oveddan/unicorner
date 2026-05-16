@@ -51,6 +51,8 @@ const STATUS_TYPES: Record<number, string> = {
   0xe0: 'Pitch Bend',
 }
 
+const MAPPINGS_KEY = 'unicorner.midi.mappings.v1'
+
 export function sigKey(s: MidiSignature) {
   return `${s.device}|${s.channel}|${s.type}|${s.data1}`
 }
@@ -62,10 +64,27 @@ export function MidiProvider({ children }: { children: ReactNode }) {
   const [lastEvent, setLastEvent] = useState<MidiEvent | null>(null)
   const [recent, setRecent] = useState<MidiEvent[]>([])
   const [latestByKey, setLatestByKey] = useState<Map<string, MidiEvent>>(new Map())
-  const [mappings, setMappings] = useState<Mapping[]>([])
+  const [mappings, setMappings] = useState<Mapping[]>(() => {
+    try {
+      const raw = localStorage.getItem(MAPPINGS_KEY)
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? (parsed as Mapping[]) : []
+    } catch {
+      return []
+    }
+  })
   const [normByControl, setNormByControl] = useState<Map<string, number>>(new Map())
   const mappingsRef = useRef(mappings)
   mappingsRef.current = mappings
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MAPPINGS_KEY, JSON.stringify(mappings))
+    } catch {
+      // quota / disabled storage — ignore
+    }
+  }, [mappings])
 
   useEffect(() => {
     if (!navigator.requestMIDIAccess) {

@@ -1,7 +1,10 @@
+import { useState } from 'react'
 import { useMidi } from './midi/MidiProvider'
 
 export function MidiMonitor() {
   const { status, error, inputs, recent, latestByKey, mappings, removeMapping } = useMidi()
+  const [expanded, setExpanded] = useState(false)
+  const eventsShown = expanded ? recent.slice(0, 100) : recent.slice(0, 2)
 
   const latestRows = Array.from(latestByKey.values()).sort((a, b) =>
     a.device === b.device
@@ -82,7 +85,16 @@ export function MidiMonitor() {
         </tbody>
       </table>
 
-      <h3>Recent events (last 200)</h3>
+      <h3>
+        Recent events ({expanded ? 'last 100' : 'last 2'})
+        <button
+          className="expand-btn"
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? 'collapse' : 'expand'}
+        >
+          {expanded ? '−' : '+'}
+        </button>
+      </h3>
       <table className="midi-table midi-log">
         <thead>
           <tr>
@@ -96,7 +108,7 @@ export function MidiMonitor() {
           </tr>
         </thead>
         <tbody>
-          {recent.map((r, i) => (
+          {eventsShown.map((r, i) => (
             <tr key={i}>
               <td>{r.time.toFixed(0)}</td>
               <td>{r.device}</td>

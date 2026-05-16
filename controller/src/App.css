@@ -221,3 +221,17 @@ input[type='range'] {
   border-radius: 4px;
   font-family: ui-monospace, monospace;
 }
+
+.expand-btn {
+  margin-left: 8px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 1px solid #444;
+  background: #222;
+  color: #eee;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.expand-btn:hover { background: #2a2a2a; }
