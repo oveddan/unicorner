@@ -1,10 +1,46 @@
-import { useEffect, useState } from 'react'
-import type { Control, ControllerSpec } from './types'
+import { useCallback, useState } from 'react'
+import type { Control, InboundMessage, SurfaceParam } from './types'
 import { Knob } from './widgets/Knob'
 import { Toggle } from './widgets/Toggle'
 import { Unsupported } from './widgets/Unsupported'
 import { useTDSocket } from './transport/ws'
 import { SendContext } from './transport/context'
+
+const SURFACE_PATH = '/project1/controller_surface'
+
+function paramToControl(param: SurfaceParam): Control {
+  const path = `${SURFACE_PATH}/${param.name}`
+  switch (param.type) {
+    case 'float':
+    case 'int':
+      return {
+        id: param.name,
+        type: 'knob',
+        label: param.label,
+        bind: {
+          path,
+          param_type: param.type,
+          min: param.min,
+          max: param.max,
+          curve: 'linear',
+        },
+      }
+    case 'bool':
+      return {
+        id: param.name,
+        type: 'toggle',
+        label: param.label,
+        bind: { path, param_type: 'bool' },
+      }
+    case 'pulse':
+      return {
+        id: param.name,
+        type: 'button',
+        label: param.label,
+        bind: { path, param_type: 'pulse' },
+      }
+  }
+}
 
 function renderControl(control: Control) {
   switch (control.type) {
@@ -17,53 +53,41 @@ function renderControl(control: Control) {
   }
 }
 
-function ControlsGrid({ spec }: { spec: ControllerSpec }) {
-  const byId = new Map(spec.controls.map((c) => [c.id, c]))
-
-  if (spec.layout && spec.layout.length > 0) {
-    return (
-      <div className="rows">
-        {spec.layout.map((row, i) => (
-          <div className="row" key={i}>
-            {row.map((id) => {
-              const c = byId.get(id)
-              return c ? renderControl(c) : null
-            })}
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  return <div className="grid">{spec.controls.map(renderControl)}</div>
-}
-
 export default function App() {
-  const [spec, setSpec] = useState<ControllerSpec | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const { status, send } = useTDSocket()
+  const [params, setParams] = useState<SurfaceParam[] | null>(null)
 
-  useEffect(() => {
-    fetch('/specs/a.json')
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      .then((data: ControllerSpec) => setSpec(data))
-      .catch((e) => setError(String(e)))
+  const onMessage = useCallback((msg: InboundMessage) => {
+    if (msg.type === 'schema') {
+      console.log(`[app] schema received: ${msg.params.length} param(s)`, msg.params)
+      setParams(msg.params)
+    }
   }, [])
+
+  const { status, send } = useTDSocket({ onMessage })
 
   return (
     <SendContext value={send}>
       <div className="app">
         <header>
           <h1>Unicorner Controller</h1>
-          <div className="scene">scene: {spec?.scene_id ?? '…'}</div>
+          <div className="scene">surface: {SURFACE_PATH}</div>
           <div className={`wsbadge wsbadge-${status}`}>td: {status}</div>
         </header>
-        {error && <div className="error">Failed to load spec: {error}</div>}
-        {!error && !spec && <div className="loading">Loading…</div>}
-        {spec && <ControlsGrid spec={spec} />}
+        {status !== 'open' && !params && (
+          <div className="loading">Waiting for TouchDesigner…</div>
+        )}
+        {status === 'open' && !params && (
+          <div className="loading">Connected. Waiting for schema…</div>
+        )}
+        {params && params.length === 0 && (
+          <div className="error">
+            Connected, but the controller surface is empty. Add custom params to{' '}
+            <code>{SURFACE_PATH}</code> in TouchDesigner.
+          </div>
+        )}
+        {params && params.length > 0 && (
+          <div className="grid">{params.map((p) => renderControl(paramToControl(p)))}</div>
+        )}
       </div>
     </SendContext>
   )

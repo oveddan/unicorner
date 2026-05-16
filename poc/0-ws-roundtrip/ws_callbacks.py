@@ -1,9 +1,12 @@
-# Web Server DAT callbacks for POC 0.
+# Web Server DAT callbacks for POC 0 + controller-surface schema push.
 # Pastes into the auto-generated callbacks DAT on the Web Server DAT.
 #
 # Handles:
-#   onWebSocketReceiveText  — parse {type:"set", path, value} and write to a param
-#   onWebSocketOpen / Close — log connection lifecycle for visibility during testing
+#   onWebSocketOpen          — enumerate /project1/controller_surface custom params
+#                              and push a {type:"schema", params:[...]} message to
+#                              the connecting client so the iPad app can build its UI
+#   onWebSocketReceiveText   — parse {type:"set", path, value} and write to a param
+#   onWebSocketClose         — log connection lifecycle for visibility
 #
 # Keep this file in source control as the spec for what the callback does.
 # In TD, the callbacks DAT contents must match this.
@@ -11,8 +14,11 @@
 import json
 
 
+SURFACE_PATH = "/project1/controller_surface"
+
+
 def _set_param(path: str, value):
-	# path is "<node_path>/<param_name>", e.g. "/project1/poc0_target/value0"
+	# path is "<node_path>/<param_name>", e.g. "/project1/controller_surface/Intensity"
 	# Split into node path + param name. Param names never contain "/", node paths can.
 	node_path, _, param_name = path.rpartition("/")
 	if not node_path or not param_name:
@@ -33,8 +39,56 @@ def _set_param(path: str, value):
 	return True
 
 
+def _widget_type_for_par(par):
+	# Map TD par style → controller widget type. Returns None for styles we don't render.
+	style = par.style
+	if style in ("Float",):
+		return "float"
+	if style in ("Int",):
+		return "int"
+	if style in ("Toggle",):
+		return "bool"
+	if style in ("Pulse", "Momentary"):
+		return "pulse"
+	return None
+
+
+def _build_schema():
+	surface = op(SURFACE_PATH)
+	if surface is None:
+		debug(f"poc0: no controller surface at {SURFACE_PATH!r}; sending empty schema")
+		return {"type": "schema", "params": []}
+
+	params = []
+	for par in surface.customPars:
+		widget_type = _widget_type_for_par(par)
+		if widget_type is None:
+			continue
+		entry = {
+			"name": par.name,
+			"label": par.label,
+			"type": widget_type,
+		}
+		if widget_type in ("float", "int"):
+			entry["min"] = par.normMin
+			entry["max"] = par.normMax
+		try:
+			entry["default"] = par.default
+		except Exception:
+			pass
+		params.append(entry)
+
+	return {"type": "schema", "params": params}
+
+
 def onWebSocketOpen(webServerDAT, client, uri):
 	debug(f"poc0: ws open  client={client} uri={uri}")
+	try:
+		schema = _build_schema()
+		webServerDAT.webSocketSendText(client, json.dumps(schema))
+		debug(f"poc0: sent schema with {len(schema['params'])} param(s) to {client}")
+	except Exception as e:
+		debug(f"poc0: failed to send schema to {client}: {e}")
 	return
 
 

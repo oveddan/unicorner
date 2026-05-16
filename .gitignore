@@ -13,5 +13,11 @@ TouchDesigner.log
 node_modules/
 .DS_Store
 
+# Vite dev-server cache
+.vite/
+
+# Local Claude Code state (plans, settings, project memory)
+.claude/
+
 # Vendored TouchDesigner MCP artifact — fetched by scripts/setup-td-mcp.sh
 vendor/

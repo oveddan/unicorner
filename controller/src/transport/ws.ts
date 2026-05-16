@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { SetMessage } from '../types'
+import type { InboundMessage, SetMessage } from '../types'
 
 export type WSStatus = 'connecting' | 'open' | 'closed'
 
@@ -10,9 +10,15 @@ function wsUrl(): string {
   return `ws://${host}:${WS_PORT}`
 }
 
-export function useTDSocket() {
+type Options = {
+  onMessage?: (msg: InboundMessage) => void
+}
+
+export function useTDSocket(options: Options = {}) {
   const wsRef = useRef<WebSocket | null>(null)
   const [status, setStatus] = useState<WSStatus>('connecting')
+  const onMessageRef = useRef(options.onMessage)
+  onMessageRef.current = options.onMessage
 
   useEffect(() => {
     let cancelled = false
@@ -38,6 +44,18 @@ export function useTDSocket() {
       }
       ws.onerror = (e) => {
         console.warn('[ws] error', e)
+      }
+      ws.onmessage = (ev) => {
+        if (cancelled) return
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(ev.data)
+        } catch (e) {
+          console.warn('[ws] non-JSON message', ev.data, e)
+          return
+        }
+        const handler = onMessageRef.current
+        if (handler) handler(parsed as InboundMessage)
       }
     }
 
