@@ -319,8 +319,7 @@ def _handle_generate(ws_dat, client, msg) -> None:
         try:
             import td
             td.run(
-                "op('/project1/unicorner_controller/callbacks').module._apply_pending("
-                f"{scene_id!r})",
+                f"op({me.path!r}).module._apply_pending({scene_id!r})",
                 delayFrames=1,
             )
         except Exception as e:
@@ -568,8 +567,7 @@ def _handle_understand_scene(ws_dat, client, msg) -> None:
         try:
             import td
             td.run(
-                "op('/project1/unicorner_controller/callbacks').module._apply_pending_summary("
-                f"{scene_id!r})",
+                f"op({me.path!r}).module._apply_pending_summary({scene_id!r})",
                 delayFrames=1,
             )
         except Exception as e:
