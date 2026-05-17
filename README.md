@@ -32,7 +32,7 @@ Layer B — Generic visual modules in TouchDesigner
         ▼
 Layer C — AI-generated controller
   LLM reads Layer B's parameter catalog → emits a ControllerSpec (JSON)
-  Renderer turns the spec into a live web UI that writes back to TD via OSC
+  Renderer turns the spec into a live web UI that writes back to TD via WebSocket
 ```
 
 ## Versions
