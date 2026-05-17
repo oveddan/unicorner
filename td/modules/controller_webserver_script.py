@@ -289,6 +289,9 @@ def _handle_generate(ws_dat, client, msg) -> None:
         'history':       msg.get('history') or [],
         'scene_summary': scene_summary,
     }
+    # Resolve me.path on the main thread — TD objects must not be touched
+    # from background threads (causes the cross-thread warning on Windows).
+    me_path = me.path  # noqa: F821
 
     def _worker():
         try:
@@ -319,7 +322,7 @@ def _handle_generate(ws_dat, client, msg) -> None:
         try:
             import td
             td.run(
-                f"op({me.path!r}).module._apply_pending({scene_id!r})",
+                f"op({me_path!r}).module._apply_pending({scene_id!r})",
                 delayFrames=1,
             )
         except Exception as e:
@@ -556,6 +559,7 @@ def _handle_understand_scene(ws_dat, client, msg) -> None:
     _send(ws_dat, client, {'type': 'understand_thinking', 'scene': cfg['scene_id']})
 
     scene_id = cfg['scene_id']
+    me_path = me.path  # noqa: F821 — captured on main thread before worker starts
 
     def _worker():
         try:
@@ -567,7 +571,7 @@ def _handle_understand_scene(ws_dat, client, msg) -> None:
         try:
             import td
             td.run(
-                f"op({me.path!r}).module._apply_pending_summary({scene_id!r})",
+                f"op({me_path!r}).module._apply_pending_summary({scene_id!r})",
                 delayFrames=1,
             )
         except Exception as e:
