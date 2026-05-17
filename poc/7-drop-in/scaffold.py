@@ -222,7 +222,7 @@ callbacks_dat.text = webserver_script_src
 callbacks_dat.nodeX = 0; callbacks_dat.nodeY = -100
 
 if hasattr(ws.par, 'callbacks'):
-    ws.par.callbacks = callbacks_dat.path
+    ws.par.callbacks = callbacks_dat.name
 
 # ----- Parameter Execute DAT for Scene / Generate / Savekey --------------
 parexec = comp.create('parameterexecuteDAT', 'parexec1')
