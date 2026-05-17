@@ -525,6 +525,33 @@ input[type='range'] {
   white-space: pre-wrap;
 }
 
+.drawer-depth {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.drawer-depth-label {
+  font-size: 11px;
+  color: #888;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+.drawer-depth-btn {
+  background: transparent;
+  color: #888;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.drawer-depth-btn:hover { color: #ccc; border-color: #444; }
+.drawer-depth-active {
+  background: #1e3a2a !important;
+  color: #7ecfa0 !important;
+  border-color: #3a6a4a !important;
+}
+
 .drawer-input {
   padding: 12px 14px;
   border-top: 1px solid #2a2a2a;

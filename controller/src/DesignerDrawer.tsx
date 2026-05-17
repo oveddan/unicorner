@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type {
   AlternativeOption,
+  CatalogDepth,
   ControllerSpec,
   GenerateMessage,
   PickAlternativeMessage,
@@ -73,6 +74,22 @@ function draftStorageKey(scene: string) {
   return `unicorner.chat.draft.${scene || 'default'}`
 }
 
+function depthStorageKey(scene: string) {
+  return `unicorner.depth.${scene || 'default'}`
+}
+
+function loadDepth(scene: string): CatalogDepth {
+  try {
+    const v = localStorage.getItem(depthStorageKey(scene))
+    if (v === 'full' || v === 'curated' || v === 'minimal') return v
+  } catch { /* ignore */ }
+  return 'full'
+}
+
+function saveDepth(scene: string, depth: CatalogDepth) {
+  try { localStorage.setItem(depthStorageKey(scene), depth) } catch { /* ignore */ }
+}
+
 function loadChat(scene: string): ChatTurn[] {
   try {
     const raw = localStorage.getItem(chatStorageKey(scene))
@@ -117,6 +134,7 @@ export function DesignerDrawer({
   const [open, setOpen] = useState(false)
   const [chat, setChat] = useState<ChatTurn[]>(() => loadChat(scene))
   const [draft, setDraft] = useState(() => loadDraft(scene))
+  const [depth, setDepth] = useState<CatalogDepth>(() => loadDepth(scene))
   const [summaryEditing, setSummaryEditing] = useState(false)
   const [summaryDraft, setSummaryDraft] = useState('')
   const send = useSend()
@@ -126,10 +144,11 @@ export function DesignerDrawer({
   // don't yank them back when a new turn arrives.
   const autoScrollRef = useRef(true)
 
-  // Reload chat history + draft when scene changes — each scene has its own.
+  // Reload chat history + draft + depth when scene changes — each scene has its own.
   useEffect(() => {
     setChat(loadChat(scene))
     setDraft(loadDraft(scene))
+    setDepth(loadDepth(scene))
     setSummaryEditing(false)
     lastAppliedRef.current = null
   }, [scene])
@@ -139,6 +158,10 @@ export function DesignerDrawer({
   useEffect(() => {
     saveDraft(scene, draft)
   }, [scene, draft])
+
+  useEffect(() => {
+    saveDepth(scene, depth)
+  }, [scene, depth])
 
   // Auto-scroll the chat log to the bottom on new turns, *unless* the user
   // has scrolled up to read older content.
@@ -237,6 +260,7 @@ export function DesignerDrawer({
       prompt,
       scene,
       history,
+      depth,
       ...(sceneSummary && sceneSummary.text ? { scene_summary: sceneSummary.text } : {}),
     }
     send(msg)
@@ -276,7 +300,7 @@ export function DesignerDrawer({
   }
 
   function rescanScene() {
-    const msg: UnderstandSceneMessage = { type: 'understand_scene', scene }
+    const msg: UnderstandSceneMessage = { type: 'understand_scene', scene, depth }
     send(msg)
   }
 
@@ -467,6 +491,23 @@ export function DesignerDrawer({
         </div>
 
         <div className="drawer-input">
+          <div className="drawer-depth">
+            <span className="drawer-depth-label">Catalog depth</span>
+            {(['full', 'curated', 'minimal'] as CatalogDepth[]).map((d) => (
+              <button
+                key={d}
+                className={`drawer-depth-btn ${depth === d ? 'drawer-depth-active' : ''}`}
+                onClick={() => setDepth(d)}
+                title={
+                  d === 'full'    ? 'Send all params — best quality, most tokens' :
+                  d === 'curated' ? 'Drop auto-detected builtins from untagged ops — good balance' :
+                                    'Send only author-tagged ops — smallest catalog, use when hitting rate limits'
+                }
+              >
+                {d}
+              </button>
+            ))}
+          </div>
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

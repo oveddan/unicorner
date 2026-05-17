@@ -258,10 +258,13 @@ def _handle_generate(ws_dat, client, msg) -> None:
 
     # Phase 1: main-thread prep (catalog walk + API key + messages).
     scene_summary = msg.get('scene_summary') if isinstance(msg.get('scene_summary'), str) else None
+    # Message-level depth overrides the COMP param (iPad can send it directly).
+    msg_depth = msg.get('depth')
+    catalog_depth = msg_depth if msg_depth in ('full', 'curated', 'minimal') else cfg.get('catalog_depth', 'full')
     try:
         catalog    = gen.trim_catalog(
             gen.extract_catalog(cfg['scene_root'], cfg['scene_id']),
-            cfg.get('catalog_depth', 'full'),
+            catalog_depth,
         )
         dj_catalog = gen.extract_djay_catalog(cfg.get('djay_path') or '')
         api_key    = gen.resolve_api_key(cfg.get('comp'))
@@ -554,10 +557,12 @@ def _handle_understand_scene(ws_dat, client, msg) -> None:
         return
 
     cfg = _config()
+    msg_depth = msg.get('depth')
+    catalog_depth = msg_depth if msg_depth in ('full', 'curated', 'minimal') else cfg.get('catalog_depth', 'full')
     try:
         catalog = gen.trim_catalog(
             gen.extract_catalog(cfg['scene_root'], cfg['scene_id']),
-            cfg.get('catalog_depth', 'full'),
+            catalog_depth,
         )
         api_key = gen.resolve_api_key(cfg.get('comp'))
     except Exception as e:

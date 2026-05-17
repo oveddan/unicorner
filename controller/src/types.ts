@@ -157,12 +157,15 @@ export type SetMessage = {
   value: number | boolean
 }
 
+export type CatalogDepth = 'full' | 'curated' | 'minimal'
+
 export type GenerateMessage = {
   type: 'generate'
   prompt: string
   scene: string
   history: Array<{ role: 'user' | 'assistant'; content: string }>
   scene_summary?: string
+  depth?: CatalogDepth
 }
 
 export type PickAlternativeMessage = {
@@ -174,6 +177,7 @@ export type PickAlternativeMessage = {
 export type UnderstandSceneMessage = {
   type: 'understand_scene'
   scene: string
+  depth?: CatalogDepth
 }
 
 /** Nuke everything for the active scene: destroy the controller_surface +
