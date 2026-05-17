@@ -75,6 +75,7 @@ export type GenerateMessage = {
   prompt: string
   scene: string
   history: Array<{ role: 'user' | 'assistant'; content: string }>
+  scene_summary?: string
 }
 
 export type PickAlternativeMessage = {
@@ -83,7 +84,16 @@ export type PickAlternativeMessage = {
   alt_id: string
 }
 
-export type OutboundMessage = SetMessage | GenerateMessage | PickAlternativeMessage
+export type UnderstandSceneMessage = {
+  type: 'understand_scene'
+  scene: string
+}
+
+export type OutboundMessage =
+  | SetMessage
+  | GenerateMessage
+  | PickAlternativeMessage
+  | UnderstandSceneMessage
 
 export type SurfaceParamType = 'float' | 'int' | 'bool' | 'pulse'
 
@@ -129,12 +139,37 @@ export type AlternativeOption = {
   id: string
   label: string
   description: string
+  /** 'choice' = legacy alternatives (server has a spec ready). 'question' = the
+   *  model asked a clarifying question; tapping picks an answer and triggers
+   *  another generate. */
+  kind?: 'choice' | 'question'
 }
 
 export type AlternativesMessage = {
   type: 'alternatives'
   scene: string
   alternatives: AlternativeOption[]
+  /** Only present when alternatives are question-kind: the assistant's prompt
+   *  to the user, rendered above the chips. */
+  question?: string
+}
+
+export type SceneSummary = {
+  text: string
+  generatedAt: number
+  stale: boolean
+  editedByUser: boolean
+}
+
+export type SceneSummaryMessage = {
+  type: 'scene_summary'
+  scene: string
+  summary: string
+}
+
+export type UnderstandThinkingMessage = {
+  type: 'understand_thinking'
+  scene: string
 }
 
 export type InboundMessage =
@@ -144,3 +179,5 @@ export type InboundMessage =
   | ErrorMessage
   | SceneChangedMessage
   | AlternativesMessage
+  | SceneSummaryMessage
+  | UnderstandThinkingMessage

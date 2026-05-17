@@ -64,6 +64,27 @@ _pending: dict = {}  # scene_id -> {'response': str, 'catalog': dict, 'error': s
 # either picks one or starts a new generation.
 _pending_alternatives: dict = {}  # scene_id -> [{'id', 'label', 'description', 'spec'}, ...]
 
+# Per-scene clarifying-question state. When the model returns a question
+# instead of a spec, we stash:
+#   - the answer chips ({id, label, description})
+#   - the original user prompt that triggered the question
+#   - the assistant's question text (so we can append it to history when the
+#     user picks an answer)
+#   - the conversation history at the time of the question
+#   - the in-flight scene_summary (if any) so we keep using it when the user
+#     answers
+_pending_questions: dict = {}  # scene_id -> {answers, prompt, question, history, scene_summary}
+
+# Per-scene pending scene-understanding request. The worker stores its result
+# here, then schedules `_apply_pending_summary` on the main thread.
+_pending_summary: dict = {}  # scene_id -> {'summary': str|None, 'error': str|None}
+
+# Per-scene context for the *current* in-flight generate. We need this when
+# the model comes back with a question — we have to remember what the user
+# asked + what summary was active so the follow-up generate (after they pick
+# an answer chip) can reconstruct the conversation.
+_generate_context_by_scene: dict = {}  # scene_id -> {prompt, history, scene_summary}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -222,6 +243,7 @@ def _handle_generate(ws_dat, client, msg) -> None:
         return
 
     # Phase 1: main-thread prep (catalog walk + API key + messages).
+    scene_summary = msg.get('scene_summary') if isinstance(msg.get('scene_summary'), str) else None
     try:
         catalog  = gen.extract_catalog(cfg['scene_root'], cfg['scene_id'])
         api_key  = gen.resolve_api_key(cfg.get('comp'))
@@ -230,6 +252,7 @@ def _handle_generate(ws_dat, client, msg) -> None:
             user_prompt,
             history=msg.get('history') or [],
             current_spec=_last_spec_by_scene.get(cfg['scene_id']),
+            scene_summary=scene_summary,
         )
     except Exception as e:
         traceback.print_exc()
@@ -240,11 +263,23 @@ def _handle_generate(ws_dat, client, msg) -> None:
         _send(ws_dat, client, {'type': 'error', 'msg': gen._api_key_not_found_msg()})
         return
 
+    # Starting a new generate invalidates any prior pending question for this
+    # scene — the user has moved on.
+    _pending_questions.pop(cfg['scene_id'], None)
+
     _send(ws_dat, client, {'type': 'thinking', 'scene': cfg['scene_id']})
 
     scene_id = cfg['scene_id']
     import time as _time
     started_at = _time.time()
+    # Stash the prompt + summary + history so the question-mode branch in
+    # _apply_pending can build _pending_questions[...] without a second copy
+    # of the message data.
+    _generate_context_by_scene[scene_id] = {
+        'prompt':        user_prompt,
+        'history':       msg.get('history') or [],
+        'scene_summary': scene_summary,
+    }
 
     def _worker():
         try:
@@ -326,6 +361,39 @@ def _apply_pending(scene_id: str) -> None:
 
     cfg = _config()
 
+    if parsed['mode'] == 'question':
+        ctx = _generate_context_by_scene.get(cfg['scene_id']) or {}
+        question_text = parsed['question']
+        answers = parsed['alternatives']
+        _pending_questions[cfg['scene_id']] = {
+            'answers':       answers,
+            'prompt':        ctx.get('prompt') or '',
+            'question':      question_text,
+            'history':       ctx.get('history') or [],
+            'scene_summary': ctx.get('scene_summary'),
+        }
+        # A question supersedes any pending spec-alternatives — the user can
+        # only act on one outstanding decision at a time.
+        _pending_alternatives.pop(cfg['scene_id'], None)
+        gen.log_event(scene_id, {
+            **log_base,
+            'outcome':  'question',
+            'question': question_text,
+            'answers':  [{'id': a['id'], 'label': a['label']} for a in answers],
+        })
+        if ws is not None:
+            _broadcast(ws, {
+                'type':         'alternatives',
+                'scene':        cfg['scene_id'],
+                'question':     question_text,
+                'alternatives': [
+                    {'id': a['id'], 'label': a['label'],
+                     'description': a['description'], 'kind': 'question'}
+                    for a in answers
+                ],
+            })
+        return
+
     if parsed['mode'] == 'alternatives':
         alts = parsed['alternatives']
         _pending_alternatives[cfg['scene_id']] = alts
@@ -339,7 +407,8 @@ def _apply_pending(scene_id: str) -> None:
                 'type':         'alternatives',
                 'scene':        cfg['scene_id'],
                 'alternatives': [
-                    {'id': a['id'], 'label': a['label'], 'description': a['description']}
+                    {'id': a['id'], 'label': a['label'],
+                     'description': a['description'], 'kind': 'choice'}
                     for a in alts
                 ],
             })
@@ -374,12 +443,49 @@ def _apply_and_broadcast(spec: dict, cfg: dict, ws) -> None:
 
 
 def _handle_pick_alternative(ws_dat, client, msg) -> None:
-    """User tapped one of the alternative chips. Find the chosen spec and
-    apply it; clear the pending set."""
+    """User tapped one of the alternative chips. Two flows depending on what's
+    pending for this scene:
+      - 'choice' kind: a spec is already attached; apply it and clear pending.
+      - 'question' kind: the user just answered a clarifying question. Append
+        the Q+A to history and kick off a follow-up generate.
+    """
     cfg = _config()
     scene_id = cfg['scene_id']
-    alts = _pending_alternatives.get(scene_id, [])
     alt_id = msg.get('alt_id')
+
+    # Question-mode pick takes precedence: it's the most recently pending.
+    qpend = _pending_questions.get(scene_id)
+    if qpend is not None:
+        answer = next((a for a in qpend['answers'] if a['id'] == alt_id), None)
+        if answer is None:
+            _send(ws_dat, client, {
+                'type': 'error',
+                'msg':  f"answer {alt_id!r} not in pending question",
+            })
+            return
+        gen = _generator()
+        if gen is not None:
+            gen.log_event(scene_id, {
+                'outcome':     'answer_question',
+                'question':    qpend['question'],
+                'answer_id':   alt_id,
+                'answer':      answer.get('label'),
+            })
+        # Append the question + answer to history, then re-enter generate.
+        followup_history = list(qpend.get('history') or [])
+        followup_history.append({'role': 'user',      'content': qpend['prompt']})
+        followup_history.append({'role': 'assistant', 'content': qpend['question']})
+        # Clear before recursing so a *new* question (if the model asks one)
+        # overwrites cleanly.
+        _pending_questions.pop(scene_id, None)
+        _handle_generate(ws_dat, client, {
+            'prompt':        answer.get('label') or '',
+            'history':       followup_history,
+            'scene_summary': qpend.get('scene_summary'),
+        })
+        return
+
+    alts = _pending_alternatives.get(scene_id, [])
     chosen = next((a for a in alts if a['id'] == alt_id), None)
     if chosen is None:
         _send(ws_dat, client, {
@@ -398,6 +504,74 @@ def _handle_pick_alternative(ws_dat, client, msg) -> None:
             'rejected':  [{'id': a['id'], 'label': a['label']} for a in alts if a['id'] != alt_id],
         })
     _apply_and_broadcast(chosen['spec'], cfg, ws_dat)
+
+
+def _handle_understand_scene(ws_dat, client, msg) -> None:
+    """Async scene summary. Same threading pattern as `_handle_generate`:
+    main thread walks the catalog + resolves the API key, worker thread hits
+    Anthropic, main thread broadcasts the summary back to all clients.
+    """
+    gen = _generator()
+    if gen is None:
+        _send(ws_dat, client, {
+            'type': 'error',
+            'msg':  'generator Text DAT not found — re-run poc/7-drop-in/scaffold.py',
+        })
+        return
+
+    cfg = _config()
+    try:
+        catalog = gen.extract_catalog(cfg['scene_root'], cfg['scene_id'])
+        api_key = gen.resolve_api_key(cfg.get('comp'))
+    except Exception as e:
+        traceback.print_exc()
+        _send(ws_dat, client, {'type': 'error', 'msg': str(e)})
+        return
+
+    if not api_key:
+        _send(ws_dat, client, {'type': 'error', 'msg': gen._api_key_not_found_msg()})
+        return
+
+    _send(ws_dat, client, {'type': 'understand_thinking', 'scene': cfg['scene_id']})
+
+    scene_id = cfg['scene_id']
+
+    def _worker():
+        try:
+            summary = gen.summarize_catalog(catalog, model=gen.DEFAULT_MODEL, api_key=api_key)
+            _pending_summary[scene_id] = {'summary': summary, 'error': None}
+        except Exception as e:
+            traceback.print_exc()
+            _pending_summary[scene_id] = {'summary': None, 'error': str(e)}
+        try:
+            import td
+            td.run(
+                "op('/project1/unicorner_controller/callbacks').module._apply_pending_summary("
+                f"{scene_id!r})",
+                delayFrames=1,
+            )
+        except Exception as e:
+            traceback.print_exc()
+            print(f"controller_ws: failed to schedule _apply_pending_summary: {e}")
+
+    threading.Thread(target=_worker, daemon=True, name='unicorner-summarize').start()
+
+
+def _apply_pending_summary(scene_id: str) -> None:
+    entry = _pending_summary.pop(scene_id, None)
+    if entry is None:
+        return
+    ws = op('webserver1')  # noqa: F821
+    if ws is None:
+        return
+    if entry.get('error'):
+        _broadcast(ws, {'type': 'error', 'msg': entry['error']})
+        return
+    _broadcast(ws, {
+        'type':    'scene_summary',
+        'scene':   scene_id,
+        'summary': entry.get('summary') or '',
+    })
 
 
 def _handle_scene_change(ws_dat) -> None:
@@ -450,6 +624,8 @@ def onWebSocketReceiveText(webServerDAT, client, data):
         _handle_generate(webServerDAT, client, msg)
     elif t == 'pick_alternative':
         _handle_pick_alternative(webServerDAT, client, msg)
+    elif t == 'understand_scene':
+        _handle_understand_scene(webServerDAT, client, msg)
     else:
         debug(f"controller_ws: ignoring msg type={t!r}")  # noqa: F821
 

@@ -4,6 +4,8 @@ import type {
   ControllerSpec,
   GenerateMessage,
   PickAlternativeMessage,
+  SceneSummary,
+  UnderstandSceneMessage,
 } from './types'
 import { useSend } from './transport/context'
 
@@ -18,14 +20,22 @@ type Props = {
   errorMsg: string | null
   lastSpec: ControllerSpec | null
   alternatives: AlternativeOption[] | null
+  sceneSummary: SceneSummary | null
+  summaryStatus: 'idle' | 'thinking' | 'error'
   /** When a spec arrives, append a synthetic assistant turn to the chat log. */
   onSpecRendered: (turn: ChatTurn) => void
   /** Clears the pending-alternatives state at the app level once we've consumed it. */
   onAlternativesConsumed: () => void
+  /** Persist a user edit (or clear) to the scene summary. */
+  onSceneSummaryChange: (next: SceneSummary | null) => void
 }
 
 function chatStorageKey(scene: string) {
   return `unicorner.chat.${scene || 'default'}`
+}
+
+function draftStorageKey(scene: string) {
+  return `unicorner.chat.draft.${scene || 'default'}`
 }
 
 function loadChat(scene: string): ChatTurn[] {
@@ -47,21 +57,69 @@ function saveChat(scene: string, turns: ChatTurn[]) {
   }
 }
 
+function loadDraft(scene: string): string {
+  try {
+    return localStorage.getItem(draftStorageKey(scene)) || ''
+  } catch {
+    return ''
+  }
+}
+
+function saveDraft(scene: string, text: string) {
+  try {
+    if (text) localStorage.setItem(draftStorageKey(scene), text)
+    else localStorage.removeItem(draftStorageKey(scene))
+  } catch {
+    /* degrade silently */
+  }
+}
+
 export function DesignerDrawer({
   scene, status, errorMsg, lastSpec, alternatives,
-  onSpecRendered, onAlternativesConsumed,
+  sceneSummary, summaryStatus,
+  onSpecRendered, onAlternativesConsumed, onSceneSummaryChange,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [chat, setChat] = useState<ChatTurn[]>(() => loadChat(scene))
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(() => loadDraft(scene))
+  const [summaryEditing, setSummaryEditing] = useState(false)
+  const [summaryDraft, setSummaryDraft] = useState('')
   const send = useSend()
   const lastAppliedRef = useRef<ControllerSpec | null>(null)
+  const logRef = useRef<HTMLDivElement | null>(null)
+  // Track whether the user has scrolled away from the bottom; if so, we
+  // don't yank them back when a new turn arrives.
+  const autoScrollRef = useRef(true)
 
-  // Reload chat history when scene changes — each scene has its own log.
+  // Reload chat history + draft when scene changes — each scene has its own.
   useEffect(() => {
     setChat(loadChat(scene))
+    setDraft(loadDraft(scene))
+    setSummaryEditing(false)
     lastAppliedRef.current = null
   }, [scene])
+
+  // Persist draft text per scene so closing the drawer mid-prompt doesn't
+  // lose work.
+  useEffect(() => {
+    saveDraft(scene, draft)
+  }, [scene, draft])
+
+  // Auto-scroll the chat log to the bottom on new turns, *unless* the user
+  // has scrolled up to read older content.
+  useEffect(() => {
+    const el = logRef.current
+    if (!el) return
+    if (!autoScrollRef.current) return
+    el.scrollTop = el.scrollHeight
+  }, [chat.length, status, summaryStatus, sceneSummary])
+
+  function onLogScroll() {
+    const el = logRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    autoScrollRef.current = nearBottom
+  }
 
   // When a new spec arrives that differs from the last one we logged, append
   // an assistant turn. Uses JSON.stringify identity — cheap, specs are small.
@@ -72,9 +130,6 @@ export function DesignerDrawer({
     const rationale = lastSpec.rationale || `Applied a ${lastSpec.controls.length}-control surface.`
     const turn: ChatTurn = { role: 'assistant', content: rationale, spec: lastSpec }
     setChat((prev) => {
-      // If the most recent turn is an alternatives chooser, mark its pickedId
-      // (best-effort by matching label — we don't know the id at this point).
-      // Don't try to be clever; just append the assistant turn.
       const next = [...prev, turn]
       saveChat(scene, next)
       return next
@@ -83,12 +138,16 @@ export function DesignerDrawer({
   }, [lastSpec, scene, onSpecRendered])
 
   // When alternatives arrive, append a chooser turn and open the drawer so
-  // the DJ sees the options.
+  // the DJ sees the options. Works for both choice-kind and question-kind
+  // (the chip UI is identical; server-side handles the difference on tap).
   useEffect(() => {
     if (!alternatives || alternatives.length === 0) return
+    const isQuestion = alternatives.some((a) => a.kind === 'question')
     const turn: ChatTurn = {
       role:    'alternatives',
-      content: `Pick one of ${alternatives.length} options:`,
+      content: isQuestion
+        ? 'I need a bit more to go on — pick the answer that fits best:'
+        : `Pick one of ${alternatives.length} options:`,
       alternatives,
     }
     setChat((prev) => {
@@ -113,6 +172,15 @@ export function DesignerDrawer({
       saveChat(scene, next)
       return next
     })
+    // If this was an answer to a clarifying question, also append the user's
+    // chosen answer as a user turn so the chat log reads like a conversation.
+    if (alt.kind === 'question') {
+      setChat((prev) => {
+        const next: ChatTurn[] = [...prev, { role: 'user', content: alt.label }]
+        saveChat(scene, next)
+        return next
+      })
+    }
   }
 
   function submit() {
@@ -129,7 +197,13 @@ export function DesignerDrawer({
       .filter((t) => t.role === 'user')
       .map((t) => ({ role: 'user' as const, content: t.content }))
 
-    const msg: GenerateMessage = { type: 'generate', prompt, scene, history }
+    const msg: GenerateMessage = {
+      type:    'generate',
+      prompt,
+      scene,
+      history,
+      ...(sceneSummary && sceneSummary.text ? { scene_summary: sceneSummary.text } : {}),
+    }
     send(msg)
   }
 
@@ -145,6 +219,43 @@ export function DesignerDrawer({
     saveChat(scene, [])
   }
 
+  function rescanScene() {
+    const msg: UnderstandSceneMessage = { type: 'understand_scene', scene }
+    send(msg)
+  }
+
+  function startEditSummary() {
+    if (!sceneSummary) return
+    setSummaryDraft(sceneSummary.text)
+    setSummaryEditing(true)
+  }
+
+  function saveEditedSummary() {
+    const text = summaryDraft.trim()
+    if (!text) {
+      setSummaryEditing(false)
+      return
+    }
+    onSceneSummaryChange({
+      text,
+      generatedAt:  sceneSummary?.generatedAt ?? Date.now(),
+      stale:        false,
+      editedByUser: true,
+    })
+    setSummaryEditing(false)
+  }
+
+  function cancelEditSummary() {
+    setSummaryEditing(false)
+  }
+
+  function clearSummary() {
+    onSceneSummaryChange(null)
+    setSummaryEditing(false)
+  }
+
+  const summaryBusy = summaryStatus === 'thinking'
+
   return (
     <>
       <button
@@ -159,10 +270,76 @@ export function DesignerDrawer({
         <header className="drawer-header">
           <strong>Designer</strong>
           <span className="drawer-scene">scene: {scene || '—'}</span>
+          <button
+            className="drawer-rescan"
+            onClick={rescanScene}
+            disabled={summaryBusy}
+            title={sceneSummary ? 'Re-scan and refresh the scene summary' : 'Scan the scene so the AI knows what it is'}
+          >
+            {summaryBusy
+              ? 'Scanning…'
+              : sceneSummary
+                ? '↻ Re-scan'
+                : '🔍 Scan scene'}
+          </button>
           <button className="drawer-close" onClick={() => setOpen(false)} aria-label="Close">×</button>
         </header>
 
-        <div className="drawer-log">
+        {sceneSummary && (
+          <section className={`drawer-summary ${sceneSummary.stale ? 'drawer-summary-stale' : ''}`}>
+            <div className="drawer-summary-head">
+              <span className="drawer-summary-title">
+                Scene understanding
+                {sceneSummary.editedByUser && <span className="drawer-summary-tag">edited</span>}
+                {sceneSummary.stale && <span className="drawer-summary-tag drawer-summary-tag-stale">stale</span>}
+              </span>
+              {!summaryEditing && (
+                <div className="drawer-summary-actions">
+                  <button onClick={startEditSummary} className="drawer-summary-btn" title="Correct the summary">
+                    Edit
+                  </button>
+                  <button onClick={clearSummary} className="drawer-summary-btn drawer-summary-btn-quiet" title="Clear the summary">
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+            {sceneSummary.stale && !summaryEditing && (
+              <div className="drawer-summary-banner">
+                Scene changed since this summary was written — click <strong>↻ Re-scan</strong> to refresh.
+              </div>
+            )}
+            {summaryEditing ? (
+              <>
+                <textarea
+                  className="drawer-summary-editor"
+                  value={summaryDraft}
+                  onChange={(e) => setSummaryDraft(e.target.value)}
+                  rows={6}
+                  autoFocus
+                />
+                <div className="drawer-summary-edit-actions">
+                  <button onClick={saveEditedSummary} className="drawer-summary-btn drawer-summary-btn-primary">
+                    Save
+                  </button>
+                  <button onClick={cancelEditSummary} className="drawer-summary-btn drawer-summary-btn-quiet">
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="drawer-summary-text">{sceneSummary.text}</p>
+            )}
+          </section>
+        )}
+
+        {!sceneSummary && !summaryBusy && (
+          <div className="drawer-summary-hint">
+            Tip: tap <strong>🔍 Scan scene</strong> first so the AI knows what's in your TouchDesigner project before designing a controller.
+          </div>
+        )}
+
+        <div className="drawer-log" ref={logRef} onScroll={onLogScroll}>
           {chat.length === 0 && (
             <div className="drawer-empty">
               Describe the controller you want — e.g. <em>"a DJ controller with reverb, brightness, and speed"</em>.
@@ -201,6 +378,12 @@ export function DesignerDrawer({
             <div className="drawer-turn drawer-turn-assistant drawer-thinking">
               <div className="drawer-turn-role">assistant</div>
               <div className="drawer-turn-content">regenerating…</div>
+            </div>
+          )}
+          {summaryBusy && (
+            <div className="drawer-turn drawer-turn-assistant drawer-thinking">
+              <div className="drawer-turn-role">scanning scene</div>
+              <div className="drawer-turn-content">reading parameters…</div>
             </div>
           )}
           {status === 'error' && errorMsg && (
