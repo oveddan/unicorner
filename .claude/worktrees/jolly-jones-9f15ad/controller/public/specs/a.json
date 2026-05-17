@@ -1,0 +1,19 @@
+{
+  "schema_version": "0.1",
+  "scene_id": "a",
+  "rationale": "Single knob driving /project1/controls.const0value (channel `position`), the Constant CHOP wired into container1.in1 → null1.position → ramp1.phase. The most direct visible control.",
+  "controls": [
+    {
+      "id": "position",
+      "type": "knob",
+      "label": "Position",
+      "bind": {
+        "path": "/project1/constant1/value0",
+        "param_type": "float",
+        "min": 0,
+        "max": 1,
+        "curve": "linear"
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+# TouchDesigner auto-saves and temp files
+# TD backups are named like main.1.toe, main.2.toe, ... (digit before the extension)
+*.[0-9].toe
+*.[0-9][0-9].toe
+*.[0-9].tox
+*.[0-9][0-9].tox
+*.toeBackup
+*.toxBackup
+Backup/
+TouchDesigner.log
+
+# Node
+node_modules/
+.DS_Store
+
+# Vendored TouchDesigner MCP artifact — fetched by scripts/setup-td-mcp.sh
+vendor/

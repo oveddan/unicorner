@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unicorner.dev/schemas/parameter-catalog.schema.json",
+  "title": "Parameter Catalog",
+  "description": "Layer B → Layer C contract. Describes the modules and parameters exposed by a TouchDesigner scene.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scene_id", "modules"],
+  "properties": {
+    "schema_version": {
+      "const": "0.1",
+      "description": "Bump when this schema changes incompatibly."
+    },
+    "scene_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable id for the scene this catalog describes (e.g. 'a', 'kaleidoscope'). Used to cache generated specs."
+    },
+    "scene_label": {
+      "type": "string",
+      "description": "Human-readable scene name shown to the AI / DJ."
+    },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/module" }
+    }
+  },
+  "$defs": {
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "parameters"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable id for this module within the scene. Matches the TD op name."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/.+",
+          "description": "Absolute TD path. Used to anchor parameter paths."
+        },
+        "label": {
+          "type": "string",
+          "description": "Human-readable module name."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional free-text describing what this module renders / does. Used as AI prompt context."
+        },
+        "parameters": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/parameter" }
+        }
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "type"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "TD param attribute name, e.g. 'Intensity'. The path is module.path + '/' + name."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/.+",
+          "description": "Absolute path the WebSocket DAT callback expects (e.g. '/project1/module_a/Intensity')."
+        },
+        "label": {
+          "type": "string",
+          "description": "Human-readable parameter name."
+        },
+        "type": {
+          "enum": ["float", "int", "bool", "pulse"],
+          "description": "TD parameter type, normalized. 'pulse' is a momentary trigger (button)."
+        },
+        "min": {
+          "type": "number",
+          "description": "Soft lower bound (slider range)."
+        },
+        "max": {
+          "type": "number",
+          "description": "Soft upper bound (slider range)."
+        },
+        "default": {
+          "description": "Type-appropriate default value (number for float/int, bool for bool, null for pulse)."
+        },
+        "semantic": {
+          "type": "string",
+          "description": "Free-text tag for the AI to reason about what this parameter does musically/visually (e.g. 'intensity', 'hue', 'speed')."
+        }
+      }
+    }
+  }
+}
