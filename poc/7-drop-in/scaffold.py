@@ -171,6 +171,24 @@ p_target.val     = '/project1'
 p_scene = page.appendStr('Scene', label='Active scene path')[0]
 p_scene.default = ''
 
+# Optional: path to a DJay Pro CHOP (or a COMP whose first null/out CHOP carries
+# the DJay channels). When set, the AI generator can wire `routings` from
+# DJay signals (beat, bar, bpm, stem amplitudes) directly into scene params.
+# Leave empty to disable routings entirely — generator falls back to today's
+# controls-only behavior.
+p_djaypath = page.appendStr('Djaypath', label='DJay Pro CHOP/COMP path (optional)')[0]
+p_djaypath.default = ''
+try:
+    p_djaypath.help = (
+        "Absolute TD path to a CHOP exposing DJay Pro channels (or a COMP "
+        "containing one). E.g. /project1/djayPro or /project1/djayPro/out1. "
+        "When set, the generator can output `routings` that wire DJay signals "
+        "into scene parameters via expressions, BPM-synced LFOs, and bar "
+        "triggers. Leave empty to disable music-reactive routings."
+    )
+except Exception:
+    pass
+
 p_prompt = page.appendStr('Prompt', label='Prompt (TD-native)')[0]
 p_prompt.default = ''
 

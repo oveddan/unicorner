@@ -61,6 +61,12 @@ The browser-side POCs (`poc/N-*/poc*.html`) are static files openable in Chrome 
 
 **PR reviews.** Opening a PR triggers [.github/workflows/claude-review.yml](.github/workflows/claude-review.yml), which runs the official `code-review` plugin and posts severity-tagged inline comments. Fires on `opened` only — pushes to an open PR do not re-review.
 
+## Designer flow — tuning the AI without TouchDesigner
+
+The system prompt that drives the generator + the routing rules ("connections from DJay Pro to scene params") are tunable from Claude Code by a designer who doesn't need TD running. The canonical source is [ai/prompts/controller-from-catalog.md](ai/prompts/controller-from-catalog.md); a thin Python tester ([ai/test_prompt.py](ai/test_prompt.py)) hits Anthropic against fixture catalogs in [ai/fixtures/](ai/fixtures/) so you can iterate, and [ai/sync_prompt.py](ai/sync_prompt.py) mirrors the prompt into `td/modules/unicorner_generator.py` SYSTEM_PROMPT (the TD-side copy that ships in the .tox).
+
+Workflow: edit the .md → `python ai/test_prompt.py "your prompt"` → iterate → `python ai/sync_prompt.py` → commit both files. CI/pre-commit should run `python ai/sync_prompt.py --check` to enforce no drift. See [ai/README.md](ai/README.md) for the full guide, including the three routing types (`direct`, `lfo_sync`, `bar_reset`) and how connections are validated.
+
 ## Troubleshooting
 
 ### `🔌 TouchDesigner Connection Failed` / `ECONNREFUSED 127.0.0.1:9981`

@@ -232,13 +232,141 @@ def _param_to_entry(comp, par, source: str = 'custom'):
 
 
 # ---------------------------------------------------------------------------
+# DJay Pro catalog — channels available from the Algoriddim integration COMP
+# ---------------------------------------------------------------------------
+#
+# The COMP's Setup page has an optional `Djaypath` param pointing at either
+# a CHOP (channels read directly) or a COMP (we look inside for a null/out
+# CHOP). Empty path → returns None → generator skips routings entirely.
+
+# Substring → semantic hint. Order matters only for the first-match: more
+# specific keys should appear before broader ones (none currently overlap,
+# but if they do, sort them by specificity).
+# First-match substring hints. Order matters — more-specific keys must come
+# before broader ones (e.g. 'rampbar' before 'bar', 'amplitude' before 'amp').
+# Tags this maps to are advisory hints for the model, not enforced anywhere.
+DJAY_SEMANTIC_HINTS = (
+    # BPM / tempo
+    ('bpm',       'bpm'),
+    ('tempo',     'bpm'),         # Ableton Link names BPM "tempo"
+    # Phase ramps (0..1 within a cycle)
+    ('rampbar',   'ramp'),        # 0..1 ramp within a bar
+    ('rampbeat',  'ramp'),        # 0..1 ramp within a beat
+    ('barphase',  'ramp'),        # djay /barPhase
+    ('phase',     'ramp'),
+    ('ramp',      'ramp'),        # bare 'ramp' — must come before 'amp'!
+    # Per-beat trigger pulses
+    ('pulse',     'trigger'),
+    ('kick',      'trigger'),
+    ('snare',     'trigger'),
+    # Counters that increment per-beat / per-bar (NOT instantaneous triggers
+    # — they're monotonic counts; use rampbar/rampbeat or pulse for actual
+    # event-driven behavior). Tagged 'counter' so the model treats them as
+    # values, not impulses.
+    ('beat',      'counter'),
+    ('bar',       'counter'),
+    ('sixteenths','counter'),
+    ('count',     'counter'),
+    # Continuous oscillators
+    ('sine',      'continuous'),  # Ableton Link sine -1..1 synced to beat
+    # Amplitudes / stem volumes
+    ('amplitude', 'amplitude'),   # must come before 'amp'
+    ('bass',      'amplitude'),
+    ('drums',     'amplitude'),
+    ('vocal',     'amplitude'),
+    ('harmonic',  'amplitude'),   # djay neuralmix stem
+    ('volume',    'amplitude'),   # djay /audibleVolume channels
+    ('meter',     'amplitude'),   # djay mixer meter
+    ('mid',       'amplitude'),
+    ('treble',    'amplitude'),
+    ('rms',       'amplitude'),
+    ('amp',       'amplitude'),
+    ('level',     'amplitude'),
+)
+
+
+def _infer_djay_semantic(name: str) -> str:
+    lower = (name or '').lower()
+    for needle, tag in DJAY_SEMANTIC_HINTS:
+        if needle in lower:
+            return tag
+    return 'unknown'
+
+
+def extract_djay_catalog(djay_path: str) -> dict:
+    """Read available CHOP channels from the DJay Pro integration op.
+
+    `djay_path` can point at a CHOP directly, or a COMP that contains a CHOP
+    output. Returns `{path, chop_path, channels: [{name, value, semantic}]}`
+    on success. Returns `None` when the path is empty or doesn't resolve to
+    a CHOP with channels — caller treats `None` as "no DJay; generate
+    controls-only as today."
+    """
+    if not djay_path:
+        return None
+    node = op(djay_path)  # noqa: F821 — TD-injected global
+    if node is None:
+        return None
+
+    chop = None
+    chop_path = None
+    # Case 1: it's a CHOP with channels.
+    if hasattr(node, 'numChans') and getattr(node, 'numChans', 0) > 0:
+        chop = node
+        chop_path = node.path
+    else:
+        # Case 2: it's a COMP — look inside for a usable CHOP output. Prefer
+        # null/out CHOPs (the conventional "publish surface"); fall back to
+        # any CHOP child with channels.
+        try:
+            children = list(node.children)
+        except Exception:
+            children = []
+        for child in children:
+            if (child.type or '').lower() in ('null', 'out') and getattr(child, 'numChans', 0) > 0:
+                chop = child; chop_path = child.path
+                break
+        if chop is None:
+            for child in children:
+                if getattr(child, 'numChans', 0) > 0:
+                    chop = child; chop_path = child.path
+                    break
+
+    if chop is None:
+        return None
+
+    channels = []
+    for i in range(chop.numChans):
+        ch = chop[i]
+        try:
+            value = float(ch[0])
+        except Exception:
+            value = None
+        channels.append({
+            'name':     ch.name,
+            'value':    value,
+            'semantic': _infer_djay_semantic(ch.name),
+        })
+
+    return {
+        'path':      djay_path,
+        'chop_path': chop_path,
+        'channels':  channels,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Prompt assembly + Anthropic call
 # ---------------------------------------------------------------------------
 
-# System prompt + few-shot. Mirrors ai/prompts/controller-from-catalog.md so
-# the generator works without filesystem access (TD's CWD is unpredictable).
-# When you edit the .md file, copy the system-prompt body into SYSTEM_PROMPT.
-SYSTEM_PROMPT = """You design opinionated control surfaces for a DJ performing visuals in TouchDesigner. The DJ already mixes music; you give them a small, well-shaped set of controls (<=12) that they can play **without thinking**.
+# System prompt. The canonical source is ai/prompts/controller-from-catalog.md
+# (between the BEGIN_SYSTEM_PROMPT / END_SYSTEM_PROMPT markers); this constant
+# is kept in sync by `python ai/sync_prompt.py` because the drop-in COMP must
+# carry its prompt as a literal string at TD runtime (no filesystem access).
+# CI / pre-commit should run `python ai/sync_prompt.py --check` to catch drift.
+SYSTEM_PROMPT = """## System prompt
+
+You design opinionated control surfaces for a DJ performing visuals in TouchDesigner. The DJ already mixes music; you give them a small, well-shaped set of controls (<=12) that they can play **without thinking**.
 
 You operate in *planning mode*: instead of always committing to one answer, you propose 2–3 *meaningfully different* options when the request admits multiple good interpretations (e.g. "intensity," "depth," "make it interesting"). The user picks one. Reserve single-spec output for requests that are unambiguous (e.g. "set speed to 4," "make speed go 0–8 exponential").
 
@@ -291,11 +419,12 @@ Use shape (c) only when you genuinely cannot tell what the user wants from the s
 2. **Every `path` in your spec must appear verbatim in the catalog you were given.** Never invent paths or rename params.
 3. **`scene_id` in your output equals `scene_id` in the catalog.**
 4. **Maximum 12 controls.** Fewer is better. The DJ has two hands.
-5. **Match widget to param type:**
-   - `float` -> `knob` or `slider`
-   - `bool` -> `toggle`
-   - `pulse` -> `button`
-   - Multi-param sweep -> `macro` (one input drives 2+ params at once)
+5. **Set `"type"` on every control** — the JSON key is literally `"type"`, not `"widget"`:
+   - `float` -> `"type": "knob"` or `"type": "slider"`
+   - `bool` -> `"type": "toggle"`
+   - `pulse` -> `"type": "button"`
+   - Multi-param sweep -> `"type": "macro"` (one input drives 2+ params at once)
+   Example: `{"id":"speed","label":"Speed","type":"knob","bind":{"path":"/…/lfo1/rate","min":0.1,"max":4.0}}`
 6. **Use macros liberally.** Most user requests ("intensity", "depth", "energy") are inherently multi-param. Bind 2–4 params per macro when they sweep together to produce the named feel.
 7. **Use curves and clamps intentionally** — these are the difference between a usable knob and a magic-feeling one:
    - `curve: "exp"` for intensity / loudness / scale — low-end matters
@@ -312,14 +441,98 @@ Design heuristics:
 - For a request like "intensity": pick 2–4 params that together convey energy/loudness/presence (e.g. material emit + light dimmer + LFO amplitude) and bind them under one macro with `exp` curve.
 - Curated params (`curated: true`) were designed by the scene author. Prefer them when they fit; only reach for `builtin` when the curated set doesn't cover the request.
 - Drop dull params (small range, low visible impact) and built-in params that are likely already wired to something else.
-- Labels are short. "Intensity" not "Visual Intensity Multiplier"."""
+- Labels are short. "Intensity" not "Visual Intensity Multiplier".
+
+## Optional: routings (when a `dj_catalog` is provided)
+
+If — and only if — the user turn includes a `dj_catalog` block (DJay Pro
+channels), you MAY add a top-level `routings` array to your spec. Routings
+wire DJay signals directly into scene parameters (autonomous, music-reactive
+behavior) and complement the manual `controls`. Without a `dj_catalog`,
+NEVER emit `routings`.
+
+Three routing types:
+
+```
+{
+  "id":           "<snake_case>",
+  "type":         "direct",
+  "label":        "Bass -> Emit",
+  "djay_channel": "<channel name from dj_catalog>",
+  "target_path":  "<scene op path from catalog>",
+  "target_param": "<param name on that op, lowercase>",
+  "min":          0.0,
+  "max":          1.0,
+  "curve":        "linear" | "exp" | "log" | "smooth",
+  "blend_control_id": "<optional: id of a control in this spec, 0-1 scales the effect>"
+}
+```
+
+```
+{
+  "id":              "<snake_case>",
+  "type":            "lfo_sync",
+  "label":           "BPM -> Scale",
+  "lfo_name":        "ai_lfo_<purpose>",
+  "bpm_channel":     "bpm",
+  "beats_per_cycle": 1,
+  "rate_multiplier_control_id": "<optional control id for an x0.25..x4 knob>",
+  "targets": [
+    { "path": "<scene op path>", "param": "<lowercase>", "min": 0.8, "max": 1.2, "curve": "linear" }
+  ]
+}
+```
+
+```
+{
+  "id":              "<snake_case>",
+  "type":            "bar_reset",
+  "label":           "Bar -> LFO reset",
+  "djay_channel":    "bar",
+  "target_lfo_path": "<full path of an LFO op in the scene, e.g. /project1/scene/ai_lfo_bpm>"
+}
+```
+
+```
+{
+  "id":              "<snake_case>",
+  "type":            "triggered_speed",
+  "label":           "Beat -> Phase advance",
+  "djay_channel":    "pulse",            // trigger channel — rises briefly on each beat/bar
+  "envelope_decay":  0.5,                 // seconds; how long each pulse pushes the integrator (default 0.5)
+  "envelope_attack": 0.0,                 // seconds; usually 0 for snappy beat response
+  "rate_multiplier_control_id": "<optional control id for a x0.25..x4 knob>",
+  "wrap":            true,                // % 1 the integrator so phase-like targets stay in [0..1] before remap
+  "targets": [
+    { "path": "<scene op path>", "param": "<lowercase>", "min": 0.0, "max": 1.0, "curve": "linear" }
+  ]
+}
+```
+
+Routing hard rules:
+- Every `djay_channel` (and `bpm_channel`) must be a channel name present in the provided `dj_catalog.channels`.
+- Every `target_path` / `targets[].path` must be a module path present in the scene catalog.
+- Every `*_control_id` must reference the `id` of a control you also include in `spec.controls`.
+- `lfo_name` is a child name (no slashes). It will be created under the scene root, tagged for cleanup.
+- `target_lfo_path` for `bar_reset` should reference an LFO you also create via `lfo_sync` in the same spec (use its computed path: `<scene_root>/<lfo_name>`), or an LFO already in the scene catalog with type `lfo`.
+- `triggered_speed` should only use channels with `trigger` semantic (`pulse`, `kick`, `snare`) — using a counter or continuous channel would push the integrator unbounded.
+
+Routing heuristics:
+- `direct` for amplitude-like channels (`bass`, `mid`, `rms`, etc.) driving visible scalar params (brightness, emit, scale).
+- `lfo_sync` whenever the user wants *smooth oscillation* that should follow tempo. `beats_per_cycle: 1` = pulse per beat, `4` = per bar. Best for sine-like motion (size pulse, color sway).
+- `triggered_speed` whenever the user wants something to *advance per beat* — phase cycling a palette, a counter ticking up, anything where each beat causes a discrete forward step. Pair with a `rate_multiplier_control_id` knob so the DJ can speed up / slow down without re-prompting.
+- `bar_reset` only when the user explicitly asks to "reset" / "restart" / "pulse on the bar" — adds a CHOP Execute DAT, which is heavier than an expression.
+- Pair a `direct` routing with a `blend_control_id` knob when the DJ might want to dial the music reactivity in or out. Pair an `lfo_sync` with a `rate_multiplier_control_id` knob when they might want to half-time / double-time.
+- Keep routings to ≤ 6. Each one is a thing the DJ has to mentally track.
+- A spec with no DJay-relevant request should omit `routings` (or set it to `[]`) even when a `dj_catalog` is provided. Don't manufacture music-reactivity the user didn't ask for."""
 
 
 def build_messages(catalog: dict,
                    user_prompt: str,
                    history: list = None,
                    current_spec: dict = None,
-                   scene_summary: str = None) -> list:
+                   scene_summary: str = None,
+                   dj_catalog: dict = None) -> list:
     """Pure function — no TD calls. Builds the messages list that will be
     POSTed to Anthropic. Split out from generate_spec() so the callbacks
     layer can extract the catalog on the main thread, then build messages
@@ -330,6 +543,11 @@ def build_messages(catalog: dict,
     optionally hand-edited). It's injected before the catalog as shared
     context so the model writes a spec against the DJ's mental picture of
     the scene rather than just the raw param dump.
+
+    `dj_catalog`, if provided, lists DJay Pro CHOP channels available for
+    routing. The model is allowed to emit a top-level `routings` array in
+    its spec when this is present. Absence of `dj_catalog` is the model's
+    signal to never emit routings.
     """
     user_turn_lines: list = []
     if scene_summary:
@@ -340,6 +558,13 @@ def build_messages(catalog: dict,
             "",
         ]
     user_turn_lines += ["Parameter catalog:", "", json.dumps(catalog, indent=2), ""]
+    if dj_catalog is not None:
+        user_turn_lines += [
+            "DJay Pro catalog (use these channel names verbatim in any `routings` you emit):",
+            "",
+            json.dumps(dj_catalog, indent=2),
+            "",
+        ]
     if current_spec is not None:
         user_turn_lines += [
             "Current applied ControllerSpec (refine this rather than starting over unless asked):",
@@ -356,10 +581,18 @@ def build_messages(catalog: dict,
         "",
         "If the request is unambiguous (single answer makes sense):",
         '  {"schema_version":"0.1","scene_id":"' + catalog['scene_id'] + '",'
-        '"rationale":"…","controls":[…],"layout":[…]}',
+        '"rationale":"…","controls":[{"id":"…","label":"…","type":"knob","bind":{"path":"…","min":0,"max":1}},…],"layout":[…]'
+        + (',"routings":[…]' if dj_catalog is not None else '')
+        + '}',
         "",
         "If the request admits multiple good interpretations (2–3 meaningfully different options):",
-        '  {"alternatives":[{"id":"a","label":"<short>","description":"<one line>","spec":{schema_version,scene_id,rationale,controls,layout}}, ...]}',
+        '  {"alternatives":[{"id":"a","label":"<short>","description":"<one line>","spec":{"schema_version":"0.1","scene_id":"'
+        + catalog['scene_id']
+        + '","rationale":"…","controls":[{"id":"…","label":"…","type":"knob","bind":{"path":"…","min":0,"max":1}}],"layout":[]'
+        + (',"routings":[…]' if dj_catalog is not None else '')
+        + '}}, ...]}',
+        "",
+        'Every control MUST have "type" (not "widget"). Valid values: "knob", "slider", "toggle", "button", "macro".',
     ]
     user_turn = "\n".join(user_turn_lines)
 
@@ -373,7 +606,7 @@ def build_messages(catalog: dict,
     return messages
 
 
-def parse_response(response_text: str, catalog: dict):
+def parse_response(response_text: str, catalog: dict, dj_catalog: dict = None):
     """Pure function — no TD calls. Parses the model output into one of two
     shapes:
 
@@ -383,6 +616,10 @@ def parse_response(response_text: str, catalog: dict):
     Each alternative is `{'id', 'label', 'description', 'spec': <ControllerSpec>}`.
     Each spec is normalized + validated; an invalid alternative is dropped
     (with a debug print) rather than failing the whole batch.
+
+    `dj_catalog`, when present, gates and validates any `routings` array on
+    the spec. Invalid individual routings are dropped (with a warning log)
+    rather than failing the whole spec — degraded mode beats no spec at all.
     """
     global _LAST_RESPONSE
     _LAST_RESPONSE = response_text
@@ -427,6 +664,7 @@ def parse_response(response_text: str, catalog: dict):
             except Exception as e:
                 print(f"unicorner: dropping invalid alternative {alt.get('id', i)!r}: {e}")
                 continue
+            _sanitize_routings(alt_spec, catalog, dj_catalog)
             alts_out.append({
                 'id':          str(alt.get('id') or chr(ord('a') + i)),
                 'label':       str(alt.get('label') or f"Option {chr(ord('A') + i)}"),
@@ -441,6 +679,7 @@ def parse_response(response_text: str, catalog: dict):
     # Single-spec shape (legacy / unambiguous).
     spec = _normalize_spec(parsed, catalog)
     _validate_spec(spec, catalog, response_text)
+    _sanitize_routings(spec, catalog, dj_catalog)
     return {'mode': 'spec', 'spec': spec}
 
 
@@ -454,6 +693,7 @@ def generate_spec(scene_root: str,
                   current_spec: dict = None,
                   scene_label: str = None,
                   scene_summary: str = None,
+                  djay_path: str = None,
                   model: str = DEFAULT_MODEL,
                   comp = None) -> dict:
     """Synchronous end-to-end: catalog → API → validated spec.
@@ -461,11 +701,16 @@ def generate_spec(scene_root: str,
     Kept for one-shot scripted use (e.g. testing from MCP). The runtime
     path through `controller_webserver_script._handle_generate` does this
     in pieces across a worker thread to avoid freezing TD's cook.
+
+    `djay_path`, when provided, enables routings: the function extracts the
+    DJay CHOP catalog and feeds it to the model alongside the scene catalog.
     """
-    catalog  = extract_catalog(scene_root, scene_id, scene_label)
-    messages = build_messages(catalog, user_prompt, history, current_spec, scene_summary)
+    catalog    = extract_catalog(scene_root, scene_id, scene_label)
+    dj_catalog = extract_djay_catalog(djay_path) if djay_path else None
+    messages   = build_messages(catalog, user_prompt, history, current_spec,
+                                scene_summary, dj_catalog=dj_catalog)
     response_text = _call_anthropic(messages, model=model, api_key=resolve_api_key(comp))
-    parsed = parse_response(response_text, catalog)
+    parsed = parse_response(response_text, catalog, dj_catalog=dj_catalog)
     # Back-compat: ad-hoc callers expect a spec dict. If alternatives, return
     # the first one. Production path uses parse_response directly and handles
     # both modes (see controller_webserver_script._apply_pending).
@@ -629,6 +874,14 @@ def _normalize_spec(spec: dict, catalog: dict) -> dict:
         # rest of the normalizer / apply path can rely on `type`.
         if 'type' not in ctrl and 'widget' in ctrl:
             ctrl['type'] = ctrl.pop('widget')
+        if 'type' not in ctrl:
+            bind = ctrl.get('bind') or {}
+            ptype = ctrl.get('param_type') or bind.get('param_type') or ''
+            if ptype == 'bool':
+                ctrl['type'] = 'toggle'
+            elif ptype == 'pulse':
+                ctrl['type'] = 'button'
+            # float/int left absent → _validate_spec raises a clear RuntimeError
         ctype = ctrl.get('type')
 
         if ctype == 'macro':
@@ -722,6 +975,96 @@ def _validate_spec(spec: dict, catalog: dict, raw_response: str = '') -> None:
                 raise RuntimeError(f"Spec binds path {bind['path']!r} not in catalog")
 
 
+def _sanitize_routings(spec: dict, catalog: dict, dj_catalog) -> None:
+    """In-place: drop any routings the model emitted that can't safely apply.
+    Logs each drop and rewrites `spec['routings']` to the surviving subset.
+
+    Validation rules (kept loose — the apply step is the ultimate gatekeeper,
+    so we only drop entries that are clearly malformed or reference nonexistent
+    catalog entries):
+      - If `dj_catalog` is absent, all routings are dropped (the prompt
+        forbade them but the model might have slipped).
+      - Each routing must have a string `type` in the known set.
+      - `djay_channel` / `bpm_channel` must exist in `dj_catalog.channels`.
+      - `target_path` / `targets[].path` must exist in the scene catalog
+        (any module path is fine; we don't enforce the param exists since
+        builtin params like `phong.emitb` may not be in the catalog entry
+        list explicitly — let the apply step catch missing pars at the
+        target node level).
+      - `*_control_id` must reference a control in `spec.controls`.
+    """
+    routings = spec.get('routings')
+    if not isinstance(routings, list):
+        if routings is not None:
+            spec['routings'] = []
+        return
+
+    if dj_catalog is None:
+        if routings:
+            print(f"unicorner: dropping {len(routings)} routing(s) — no dj_catalog provided")
+        spec['routings'] = []
+        return
+
+    channel_names = {c.get('name') for c in (dj_catalog.get('channels') or [])}
+    module_paths = {m['path'] for m in catalog.get('modules', [])}
+    control_ids = {c.get('id') for c in (spec.get('controls') or []) if isinstance(c, dict)}
+
+    survivors = []
+    for i, r in enumerate(routings):
+        if not isinstance(r, dict):
+            print(f"unicorner: dropping routing[{i}] — not an object")
+            continue
+        rtype = r.get('type')
+        try:
+            if rtype == 'direct':
+                if r.get('djay_channel') not in channel_names:
+                    raise ValueError(f"djay_channel {r.get('djay_channel')!r} not in dj_catalog")
+                if r.get('target_path') not in module_paths:
+                    raise ValueError(f"target_path {r.get('target_path')!r} not in scene catalog")
+                blend = r.get('blend_control_id')
+                if blend and blend not in control_ids:
+                    raise ValueError(f"blend_control_id {blend!r} not in spec.controls")
+            elif rtype == 'lfo_sync':
+                bpm = r.get('bpm_channel') or 'bpm'
+                if bpm not in channel_names:
+                    raise ValueError(f"bpm_channel {bpm!r} not in dj_catalog")
+                targets = r.get('targets')
+                if not isinstance(targets, list) or not targets:
+                    raise ValueError("lfo_sync has no targets")
+                for t in targets:
+                    if not isinstance(t, dict) or t.get('path') not in module_paths:
+                        raise ValueError(f"lfo_sync target path {t.get('path') if isinstance(t, dict) else t!r} not in scene catalog")
+                mult = r.get('rate_multiplier_control_id')
+                if mult and mult not in control_ids:
+                    raise ValueError(f"rate_multiplier_control_id {mult!r} not in spec.controls")
+                if not r.get('lfo_name'):
+                    raise ValueError("lfo_sync missing lfo_name")
+            elif rtype == 'bar_reset':
+                if r.get('djay_channel') not in channel_names:
+                    raise ValueError(f"djay_channel {r.get('djay_channel')!r} not in dj_catalog")
+                if not r.get('target_lfo_path'):
+                    raise ValueError("bar_reset missing target_lfo_path")
+            elif rtype == 'triggered_speed':
+                if r.get('djay_channel') not in channel_names:
+                    raise ValueError(f"djay_channel {r.get('djay_channel')!r} not in dj_catalog")
+                targets = r.get('targets')
+                if not isinstance(targets, list) or not targets:
+                    raise ValueError("triggered_speed has no targets")
+                for t in targets:
+                    if not isinstance(t, dict) or t.get('path') not in module_paths:
+                        raise ValueError(f"triggered_speed target path {t.get('path') if isinstance(t, dict) else t!r} not in scene catalog")
+                mult = r.get('rate_multiplier_control_id')
+                if mult and mult not in control_ids:
+                    raise ValueError(f"rate_multiplier_control_id {mult!r} not in spec.controls")
+            else:
+                raise ValueError(f"unknown routing type {rtype!r}")
+        except ValueError as e:
+            print(f"unicorner: dropping routing[{i}] ({r.get('id')!r}, {rtype!r}): {e}")
+            continue
+        survivors.append(r)
+    spec['routings'] = survivors
+
+
 # ---------------------------------------------------------------------------
 # Spec → scaffold (apply the ControllerSpec to a controller_surface COMP)
 # ---------------------------------------------------------------------------
@@ -730,10 +1073,25 @@ CONTROLLER_SURFACE_TAG = 'unicorner.controller-surface'
 SURFACE_NAME           = 'controller_surface'
 SURFACE_PAGE           = 'Surface'
 
+# Tag stamped on every node the routing applier creates (LFO CHOPs, CHOP
+# Execute DATs). Used for idempotent teardown — `_apply_routings` destroys
+# all such ops under the scene root before rebuilding.
+ROUTING_TAG = 'unicorner.routing'
 
-def apply_spec(spec: dict, scene_parent: str) -> str:
+# Per-scene record of target params that the routing applier set expressions
+# on. We use this to clear those expressions on the next apply, so dropping
+# a routing in a regeneration doesn't leave a dangling expression behind.
+_last_routing_targets_by_scene: dict = {}  # scene_id -> [(path, par_name)]
+
+
+def apply_spec(spec: dict, scene_parent: str, dj_chop_path: str = None) -> str:
     """Build/rebuild `<scene_parent>/controller_surface` from the spec. Returns
-    the surface path so the caller can broadcast it."""
+    the surface path so the caller can broadcast it.
+
+    If `spec` includes a `routings` array and `dj_chop_path` is provided,
+    also build the routing infrastructure (LFO CHOPs, CHOP Execute DATs,
+    bound expressions) under `scene_parent`, tagged for idempotent teardown.
+    """
     parent = op(scene_parent)  # noqa: F821 — TD-injected global
     if parent is None:
         raise RuntimeError(f"apply_spec: scene_parent {scene_parent!r} not found")
@@ -749,8 +1107,28 @@ def apply_spec(spec: dict, scene_parent: str) -> str:
 
     EXPRESSION = _par_mode_enum(parent).EXPRESSION
 
-    for ctrl in spec['controls']:
+    # Build a lookup from control.id → surface custom-par name so routings
+    # that reference a control by id (blend_control_id, rate_multiplier_…)
+    # can resolve to the actual param name without guessing.
+    control_id_to_par: dict = {}
+    VALID_APPLY_TYPES = {'knob', 'slider', 'toggle', 'button', 'macro'}
+    for i, ctrl in enumerate(spec['controls']):
+        ctype = ctrl.get('type')
+        if not ctype or ctype not in VALID_APPLY_TYPES:
+            raise RuntimeError(
+                f"Control[{i}] id={ctrl.get('id')!r} has missing/invalid "
+                f"`type` {ctype!r} — expected one of {sorted(VALID_APPLY_TYPES)}. "
+                f"Re-generate the controller."
+            )
         _apply_control(ctrl, page, surface, surface_path, EXPRESSION)
+        cid = ctrl.get('id')
+        if cid:
+            control_id_to_par[cid] = _id_to_par_name(cid)
+
+    routings = spec.get('routings') or []
+    scene_id = spec.get('scene_id') or scene_parent.rsplit('/', 1)[-1]
+    _apply_routings(routings, scene_parent, dj_chop_path, surface_path,
+                    control_id_to_par, scene_id, EXPRESSION)
 
     return surface_path
 
@@ -839,6 +1217,385 @@ def _apply_control(ctrl: dict, page, surface, surface_path: str, EXPRESSION):
 
     else:
         debug(f"unicorner: unknown control type {ctype!r}; skipping")  # noqa: F821
+
+
+# --- Routings → scaffold (Scope B / DJay) --------------------------------
+#
+# `_apply_routings` is called from apply_spec after the controller surface
+# has been built. It:
+#   1. Tears down any nodes tagged `unicorner.routing` under `scene_parent`.
+#   2. Clears expressions on target params set by *prior* routings (tracked
+#      in `_last_routing_targets_by_scene`).
+#   3. Builds the new routing infrastructure per the spec.
+#   4. Records the new target params so the next apply can clean them up.
+
+def _apply_routings(routings, scene_parent: str, dj_chop_path: str,
+                    surface_path: str, control_id_to_par: dict, scene_id: str,
+                    EXPRESSION) -> None:
+    parent = op(scene_parent)  # noqa: F821
+    if parent is None:
+        return
+
+    # 1. Teardown — destroy our prior tagged ops.
+    for child in list(parent.children):
+        if ROUTING_TAG in (child.tags or set()):
+            try:
+                child.destroy()
+            except Exception as e:
+                debug(f"unicorner: failed to destroy routing op {child.path!r}: {e}")  # noqa: F821
+
+    # 2. Clear prior routing-set expressions (best-effort).
+    CONSTANT = _par_mode_enum(parent).CONSTANT
+    for target_path, par_name in _last_routing_targets_by_scene.get(scene_id, []):
+        node = op(target_path)  # noqa: F821
+        if node is None:
+            continue
+        par = getattr(node.par, par_name, None)
+        if par is None:
+            continue
+        try:
+            par.expr = ''
+            par.mode = CONSTANT
+        except Exception:
+            pass
+
+    if not routings:
+        _last_routing_targets_by_scene[scene_id] = []
+        return
+
+    if not dj_chop_path:
+        debug("unicorner: routings present but dj_chop_path missing; skipping apply")  # noqa: F821
+        _last_routing_targets_by_scene[scene_id] = []
+        return
+
+    # 3. Apply each routing. We deliberately do all `lfo_sync` first so
+    # `bar_reset` routings that reference a freshly-created LFO by full path
+    # have a real op to point at when their callback DAT runs.
+    new_targets: list = []
+    lfo_node_x = -200
+    lfo_node_y = 600
+
+    def _bump():
+        # Cheap layout: just spread nodes horizontally to keep them visible.
+        nonlocal lfo_node_x
+        lfo_node_x += 150
+
+    for r in routings:
+        if r.get('type') == 'lfo_sync':
+            try:
+                _apply_lfo_sync_routing(
+                    r, parent, scene_parent, dj_chop_path, surface_path,
+                    control_id_to_par, EXPRESSION, new_targets,
+                    nx=lfo_node_x, ny=lfo_node_y,
+                )
+                _bump()
+            except Exception as e:
+                debug(f"unicorner: lfo_sync routing {r.get('id')!r} failed: {e}")  # noqa: F821
+
+    for r in routings:
+        if r.get('type') == 'direct':
+            try:
+                _apply_direct_routing(
+                    r, dj_chop_path, surface_path, control_id_to_par,
+                    EXPRESSION, new_targets,
+                )
+            except Exception as e:
+                debug(f"unicorner: direct routing {r.get('id')!r} failed: {e}")  # noqa: F821
+
+    for r in routings:
+        if r.get('type') == 'bar_reset':
+            try:
+                _apply_bar_reset_routing(
+                    r, parent, dj_chop_path,
+                    nx=lfo_node_x, ny=lfo_node_y + 200,
+                )
+                _bump()
+            except Exception as e:
+                debug(f"unicorner: bar_reset routing {r.get('id')!r} failed: {e}")  # noqa: F821
+
+    for r in routings:
+        if r.get('type') == 'triggered_speed':
+            try:
+                _apply_triggered_speed_routing(
+                    r, parent, dj_chop_path, surface_path,
+                    control_id_to_par, EXPRESSION, new_targets,
+                    nx=lfo_node_x, ny=lfo_node_y + 400,
+                )
+                _bump()
+            except Exception as e:
+                debug(f"unicorner: triggered_speed routing {r.get('id')!r} failed: {e}")  # noqa: F821
+
+    # 4. Remember target params for the next teardown.
+    _last_routing_targets_by_scene[scene_id] = new_targets
+
+
+def _routing_direct_expression(dj_chop_path: str, channel: str,
+                               surface_path: str, blend_par: str,
+                               lo, hi, curve: str) -> str:
+    """Build the expression for a `direct` routing. Pulls a 0..1-ish value
+    from the DJay CHOP, multiplies by the blend knob (0..1) if any,
+    optionally shapes via curve, then remaps to [lo, hi]."""
+    base = f"op('{dj_chop_path}')['{channel}']"
+    norm = base
+    if blend_par:
+        norm = f"({base}) * op('{surface_path}').par.{blend_par}"
+    # Curve in 0..1 domain (assume the DJay channel is already 0..1-ish).
+    shaped = _shape_norm(norm, curve or 'linear')
+    span = (hi - lo) if hi != lo else 1.0
+    return f"({shaped}) * ({span}) + ({lo})"
+
+
+def _apply_direct_routing(r: dict, dj_chop_path: str, surface_path: str,
+                          control_id_to_par: dict, EXPRESSION,
+                          new_targets: list) -> None:
+    target_path  = r['target_path']
+    target_param = r['target_param']
+    channel      = r['djay_channel']
+    lo = float(r.get('min', 0.0))
+    hi = float(r.get('max', 1.0))
+    curve = r.get('curve', 'linear')
+    blend_cid = r.get('blend_control_id')
+    blend_par = control_id_to_par.get(blend_cid) if blend_cid else None
+
+    node = op(target_path)  # noqa: F821
+    if node is None:
+        debug(f"unicorner: direct routing target node not found: {target_path}")  # noqa: F821
+        return
+    par = getattr(node.par, target_param, None)
+    if par is None:
+        debug(f"unicorner: direct routing target par not found: {target_path}.{target_param}")  # noqa: F821
+        return
+
+    expr = _routing_direct_expression(dj_chop_path, channel, surface_path,
+                                      blend_par, lo, hi, curve)
+    par.expr = expr
+    par.mode = EXPRESSION
+    new_targets.append((target_path, target_param))
+
+
+def _apply_lfo_sync_routing(r: dict, parent, scene_parent: str,
+                            dj_chop_path: str, surface_path: str,
+                            control_id_to_par: dict, EXPRESSION,
+                            new_targets: list, nx: int, ny: int) -> None:
+    name = r['lfo_name']
+    bpm_channel = r.get('bpm_channel') or 'bpm'
+    beats_per_cycle = float(r.get('beats_per_cycle') or 1.0)
+    mult_cid = r.get('rate_multiplier_control_id')
+    mult_par = control_id_to_par.get(mult_cid) if mult_cid else None
+
+    # Don't collide with an existing op of the same name. If one exists and
+    # wasn't tagged routing (e.g. user-authored), bail out rather than nuke.
+    existing = parent.op(name)
+    if existing is not None:
+        if ROUTING_TAG not in (existing.tags or set()):
+            debug(f"unicorner: lfo_sync wants to create {name!r} but a non-routing op already exists; skipping")  # noqa: F821
+            return
+        existing.destroy()
+
+    lfo = parent.create('lfoCHOP', name)
+    lfo.tags.add(ROUTING_TAG)
+    lfo.nodeX = nx; lfo.nodeY = ny
+
+    # rate (Hz) = bpm/60 / beats_per_cycle * mult  →  1 cycle per beat
+    # at beats_per_cycle=1, 1 per bar at 4.
+    base_rate = f"op('{dj_chop_path}')['{bpm_channel}'] / 60.0 / {beats_per_cycle}"
+    if mult_par:
+        base_rate = f"({base_rate}) * op('{surface_path}').par.{mult_par}"
+    try:
+        lfo.par.rate.expr = base_rate
+        lfo.par.rate.mode = EXPRESSION
+    except Exception as e:
+        debug(f"unicorner: failed to set lfo rate expression: {e}")  # noqa: F821
+
+    # Bind each target to the LFO output (channel 0), remapped from the
+    # LFO's natural [-1, 1] range to the target [min, max]. We don't use
+    # _shape_norm here — most users want straight sine motion when they
+    # ask for a BPM-synced LFO.
+    lfo_path = lfo.path
+    for t in r.get('targets', []):
+        tnode = op(t['path'])  # noqa: F821
+        if tnode is None:
+            debug(f"unicorner: lfo_sync target node not found: {t['path']}")  # noqa: F821
+            continue
+        par = getattr(tnode.par, t['param'], None)
+        if par is None:
+            debug(f"unicorner: lfo_sync target par not found: {t['path']}.{t['param']}")  # noqa: F821
+            continue
+        tmin = float(t.get('min', 0.0))
+        tmax = float(t.get('max', 1.0))
+        # Map LFO -1..1 → 0..1 → tmin..tmax.
+        norm = f"(op('{lfo_path}')[0] + 1.0) / 2.0"
+        expr = f"({norm}) * ({tmax - tmin}) + ({tmin})"
+        par.expr = expr
+        par.mode = EXPRESSION
+        new_targets.append((t['path'], t['param']))
+
+
+def _apply_bar_reset_routing(r: dict, parent, dj_chop_path: str,
+                              nx: int, ny: int) -> None:
+    channel = r['djay_channel']
+    target_lfo_path = r['target_lfo_path']
+
+    # Name the DAT deterministically so we don't accumulate duplicates if
+    # teardown ever misses something.
+    name = f"ai_reset_{r.get('id') or channel}"
+    name = ''.join(c for c in name if c.isalnum() or c == '_')[:30]
+
+    existing = parent.op(name)
+    if existing is not None:
+        if ROUTING_TAG not in (existing.tags or set()):
+            debug(f"unicorner: bar_reset wants to create {name!r} but a non-routing op already exists; skipping")  # noqa: F821
+            return
+        existing.destroy()
+
+    dat = parent.create('chopexecuteDAT', name)
+    dat.tags.add(ROUTING_TAG)
+    dat.nodeX = nx; dat.nodeY = ny
+    # Wire the DAT to the DJay CHOP. The TD attribute is `chop` on
+    # chopexecuteDAT.
+    try:
+        dat.par.chop = dj_chop_path
+    except Exception as e:
+        debug(f"unicorner: failed to wire bar_reset DAT to {dj_chop_path}: {e}")  # noqa: F821
+    # Watch only the rising edge — that's the actual "bar start" event.
+    for attr in ('onoffon', 'Onoffon'):
+        if hasattr(dat.par, attr):
+            try:
+                setattr(dat.par, attr, True)
+            except Exception:
+                pass
+    # Other event types: turn them off to keep the callback quiet.
+    for attr in ('whileon', 'offon', 'whileoff', 'valuechange'):
+        if hasattr(dat.par, attr):
+            try:
+                setattr(dat.par, attr, False)
+            except Exception:
+                pass
+
+    dat.text = (
+        "# Auto-generated by unicorner routing (bar_reset).\n"
+        f"_TARGET_LFO_PATH = {target_lfo_path!r}\n"
+        f"_TRIGGER_CHANNEL = {channel!r}\n"
+        "\n"
+        "def onOffToOn(channel, sampleIndex, val, prev):\n"
+        "    if channel.name != _TRIGGER_CHANNEL:\n"
+        "        return\n"
+        "    lfo = op(_TARGET_LFO_PATH)\n"
+        "    if lfo is None:\n"
+        "        return\n"
+        "    init = getattr(lfo.par, 'initialize', None)\n"
+        "    if init is None:\n"
+        "        return\n"
+        "    init.pulse()\n"
+    )
+
+
+def _safe_node_name(s: str, max_len: int = 30) -> str:
+    """TD child names: alphanumeric + underscore only, can't be empty."""
+    cleaned = ''.join(c if c.isalnum() or c == '_' else '_' for c in (s or ''))
+    return (cleaned[:max_len] or 'unnamed')
+
+
+def _apply_triggered_speed_routing(r: dict, parent, dj_chop_path: str,
+                                   surface_path: str, control_id_to_par: dict,
+                                   EXPRESSION, new_targets: list,
+                                   nx: int, ny: int) -> None:
+    """Scaffolds the per-beat-advance CHOP chain:
+
+        djay_chop -> Select(channel) -> Envelope(attack, decay, exp)
+                  -> Speed(integrate) -> expression on each target par
+
+    The Speed CHOP output grows whenever the envelope is non-zero (i.e.,
+    just after each trigger pulse). Multiplying by an optional knob lets the
+    DJ scale the per-beat advance amount in real time. `wrap=True` (default)
+    applies `% 1` so phase-like targets stay bounded before the [min,max]
+    remap; `wrap=False` lets the integrator climb unbounded (useful for
+    things like an iteration counter).
+    """
+    rid     = r.get('id') or 'unnamed'
+    channel = r['djay_channel']
+    decay   = float(r.get('envelope_decay', 0.5))
+    attack  = float(r.get('envelope_attack', 0.0))
+    mult_cid = r.get('rate_multiplier_control_id')
+    mult_par = control_id_to_par.get(mult_cid) if mult_cid else None
+    wrap    = bool(r.get('wrap', True))
+
+    sel_name = _safe_node_name(f"ai_sel_{rid}")
+    env_name = _safe_node_name(f"ai_env_{rid}")
+    spd_name = _safe_node_name(f"ai_spd_{rid}")
+
+    # Replace any prior routing-tagged ops with these names; bail if a
+    # user-authored op is in the way (don't nuke their work).
+    for nm in (sel_name, env_name, spd_name):
+        existing = parent.op(nm)
+        if existing is None:
+            continue
+        if ROUTING_TAG not in (existing.tags or set()):
+            debug(f"unicorner: triggered_speed wants to create {nm!r} but a "  # noqa: F821
+                  f"non-routing op already exists; skipping routing {rid!r}")
+            return
+        existing.destroy()
+
+    # 1. Select CHOP — pull just the trigger channel out of the DJay CHOP.
+    sel = parent.create('selectCHOP', sel_name)
+    sel.tags.add(ROUTING_TAG)
+    sel.nodeX = nx; sel.nodeY = ny
+    try:
+        sel.par.chop = dj_chop_path
+    except Exception as e:
+        debug(f"unicorner: triggered_speed Select.chop set failed: {e}")  # noqa: F821
+    # Channel-name picker. TD exposes this under different attr names across
+    # versions; try the common ones.
+    for attr in ('channames', 'channelnames', 'chanames'):
+        if hasattr(sel.par, attr):
+            try:
+                setattr(sel.par, attr, channel)
+                break
+            except Exception:
+                pass
+
+    # 2. Envelope CHOP — exponential attack/decay on the pulse.
+    env = parent.create('envelopeCHOP', env_name)
+    env.tags.add(ROUTING_TAG)
+    env.nodeX = nx + 150; env.nodeY = ny
+    env.inputConnectors[0].connect(sel)
+    # Param names vary across TD versions. Set what's available; ignore the rest.
+    for attr, val in (('attack', attack), ('decay', decay), ('release', decay),
+                      ('method', 'exp'), ('Method', 'exp')):
+        if hasattr(env.par, attr):
+            try:
+                setattr(env.par, attr, val)
+            except Exception:
+                pass
+
+    # 3. Speed CHOP — integrate the envelope into a continuously-advancing value.
+    spd = parent.create('speedCHOP', spd_name)
+    spd.tags.add(ROUTING_TAG)
+    spd.nodeX = nx + 300; spd.nodeY = ny
+    spd.inputConnectors[0].connect(env)
+
+    # 4. Bind each target via expression.
+    spd_path = spd.path
+    rate_mult_expr = (f"op('{surface_path}').par.{mult_par}"
+                      if mult_par else "1.0")
+    for t in r.get('targets', []):
+        tnode = op(t['path'])  # noqa: F821
+        if tnode is None:
+            debug(f"unicorner: triggered_speed target node not found: {t['path']}")  # noqa: F821
+            continue
+        par = getattr(tnode.par, t['param'], None)
+        if par is None:
+            debug(f"unicorner: triggered_speed target par not found: {t['path']}.{t['param']}")  # noqa: F821
+            continue
+        tmin = float(t.get('min', 0.0))
+        tmax = float(t.get('max', 1.0))
+        base = f"op('{spd_path}')[0] * ({rate_mult_expr})"
+        if wrap:
+            base = f"(({base}) % 1.0)"
+        expr = f"({base}) * ({tmax - tmin}) + ({tmin})"
+        par.expr = expr
+        par.mode = EXPRESSION
+        new_targets.append((t['path'], t['param']))
 
 
 # --- Expression shaping (Scope A) ----------------------------------------
@@ -965,6 +1722,7 @@ def run(scene_root: str,
         history: list = None,
         current_spec: dict = None,
         scene_label: str = None,
+        djay_path: str = None,
         model: str = DEFAULT_MODEL,
         comp = None) -> dict:
     """End-to-end: generate a new ControllerSpec and apply it to
@@ -972,7 +1730,12 @@ def run(scene_root: str,
     send it back to the iPad).
 
     `comp` is the drop-in unicorner_controller COMP. Passed through so the
-    API-key resolver can read its `Apikey` custom param as a fallback."""
+    API-key resolver can read its `Apikey` custom param as a fallback.
+
+    `djay_path`, when provided, enables routings: passed through to
+    `generate_spec` for catalog extraction, and the resolved CHOP path is
+    threaded into `apply_spec` so routings can be wired up at apply time.
+    """
     spec = generate_spec(
         scene_root=scene_root,
         scene_id=scene_id,
@@ -980,10 +1743,13 @@ def run(scene_root: str,
         history=history,
         current_spec=current_spec,
         scene_label=scene_label,
+        djay_path=djay_path,
         model=model,
         comp=comp,
     )
-    apply_spec(spec, scene_parent)
+    dj_catalog = extract_djay_catalog(djay_path) if djay_path else None
+    dj_chop_path = dj_catalog.get('chop_path') if dj_catalog else None
+    apply_spec(spec, scene_parent, dj_chop_path=dj_chop_path)
     return spec
 
 

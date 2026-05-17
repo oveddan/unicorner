@@ -4,10 +4,45 @@ import type {
   ControllerSpec,
   GenerateMessage,
   PickAlternativeMessage,
+  ResetSceneMessage,
+  Routing,
   SceneSummary,
   UnderstandSceneMessage,
 } from './types'
 import { useSend } from './transport/context'
+
+/** Short trailing-segment helper for chip display: turns
+ *  '/project1/scene_a/phong1' into 'phong1'. */
+function tail(path: string): string {
+  if (!path) return ''
+  const i = path.lastIndexOf('/')
+  return i === -1 ? path : path.slice(i + 1)
+}
+
+function routingChipText(r: Routing): string {
+  switch (r.type) {
+    case 'direct':
+      return `${r.djay_channel} → ${tail(r.target_path)}.${r.target_param}`
+    case 'lfo_sync': {
+      const targets = r.targets
+        .map((t) => `${tail(t.path)}.${t.param}`)
+        .join(', ')
+      const div = r.beats_per_cycle && r.beats_per_cycle !== 1
+        ? ` ÷${r.beats_per_cycle}`
+        : ''
+      return `BPM${div} LFO → ${targets}`
+    }
+    case 'bar_reset':
+      return `${r.djay_channel} → reset ${tail(r.target_lfo_path)}`
+    case 'triggered_speed': {
+      const targets = r.targets
+        .map((t) => `${tail(t.path)}.${t.param}`)
+        .join(', ')
+      const wrapped = r.wrap === false ? '' : ' %1'
+      return `${r.djay_channel} → speed${wrapped} → ${targets}`
+    }
+  }
+}
 
 type ChatTurn =
   | { role: 'user'; content: string }
@@ -219,6 +254,27 @@ export function DesignerDrawer({
     saveChat(scene, [])
   }
 
+  function resetScene() {
+    // Strong action — confirm before nuking the controller surface, the
+    // applied routings, and all server-side cached state. We optimistically
+    // clear local state too; the matching `scene_reset` broadcast from TD
+    // (handled in App.tsx) will then propagate the reset to any other open
+    // tabs / devices.
+    const ok = window.confirm(
+      'Reset this scene? This destroys the generated controller surface ' +
+      'and all music routings in TouchDesigner, and clears the chat ' +
+      'history + scene summary on every connected device.'
+    )
+    if (!ok) return
+    setChat([])
+    saveChat(scene, [])
+    setDraft('')
+    saveDraft(scene, '')
+    onSceneSummaryChange(null)
+    const msg: ResetSceneMessage = { type: 'reset_scene', scene }
+    send(msg)
+  }
+
   function rescanScene() {
     const msg: UnderstandSceneMessage = { type: 'understand_scene', scene }
     send(msg)
@@ -349,6 +405,22 @@ export function DesignerDrawer({
             <div key={i} className={`drawer-turn drawer-turn-${turn.role}`}>
               <div className="drawer-turn-role">{turn.role}</div>
               <div className="drawer-turn-content">{turn.content}</div>
+              {turn.role === 'assistant' && turn.spec?.routings && turn.spec.routings.length > 0 && (
+                <div className="drawer-turn-routings">
+                  <div className="drawer-turn-routings-head">music routings</div>
+                  <div className="drawer-turn-routings-chips">
+                    {turn.spec.routings.map((r) => (
+                      <span
+                        key={r.id}
+                        className={`drawer-routing-chip drawer-routing-${r.type}`}
+                        title={r.label}
+                      >
+                        {routingChipText(r)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               {turn.role === 'alternatives' && (
                 <div className="drawer-alternatives">
                   {turn.alternatives.map((alt) => {
@@ -409,6 +481,14 @@ export function DesignerDrawer({
             </button>
             <button onClick={clearChat} className="drawer-clear" disabled={chat.length === 0}>
               Clear history
+            </button>
+            <button
+              onClick={resetScene}
+              className="drawer-reset"
+              disabled={status === 'thinking'}
+              title="Destroy the controller surface + routings in TD, clear chat + summary on all devices"
+            >
+              Reset scene
             </button>
           </div>
         </div>

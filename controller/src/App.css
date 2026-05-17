@@ -478,6 +478,40 @@ input[type='range'] {
   opacity: 0.7;
   line-height: 1.35;
 }
+.drawer-turn-routings {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px dashed #3a3a55;
+  border-radius: 6px;
+  background: rgba(40, 80, 160, 0.08);
+}
+.drawer-turn-routings-head {
+  font-size: 10px;
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+.drawer-turn-routings-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.drawer-routing-chip {
+  font-size: 12px;
+  background: #1a1f2e;
+  border: 1px solid #355;
+  color: #cfe4ff;
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.drawer-routing-direct          { border-color: #356b8a; }
+.drawer-routing-lfo_sync        { border-color: #6b8a35; color: #d8ffcf; background: #1f2e1a; }
+.drawer-routing-bar_reset       { border-color: #8a356b; color: #ffcfe4; background: #2e1a1f; }
+.drawer-routing-triggered_speed { border-color: #8a6b35; color: #ffe4cf; background: #2e231a; }
+
 .drawer-turn-role {
   font-size: 11px;
   opacity: 0.55;
@@ -528,6 +562,15 @@ input[type='range'] {
   background: transparent !important;
   color: #aaa !important;
   border-color: #2a2a2a !important;
+}
+.drawer-reset {
+  background: transparent !important;
+  color: #f0a0a0 !important;
+  border-color: #4a2a2a !important;
+}
+.drawer-reset:hover:not(:disabled) {
+  background: #2a1a1a !important;
+  color: #ffb8b8 !important;
 }
 
 /* ----- Regen overlay on the controls grid ----- */
