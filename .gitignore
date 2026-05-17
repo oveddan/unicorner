@@ -16,6 +16,10 @@ node_modules/
 # Vite dev-server cache
 .vite/
 
+# Built controller — produced by `npm run build` and by CI for releases.
+# Not committed; CI rebuilds from source on every push to main.
+controller/dist/
+
 # Local Claude Code state (plans, settings, project memory)
 .claude/
 

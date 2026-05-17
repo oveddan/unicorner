@@ -25,10 +25,14 @@ where it's nested:
 """
 
 import json
+import mimetypes
+import os
+import posixpath
 import socket
 import threading
 import traceback
 import webbrowser
+from urllib.parse import unquote, urlsplit
 
 
 def _generator():
@@ -475,6 +479,19 @@ def _lan_ip() -> str:
 
 
 def _compute_url(comp) -> str:
+    # If the COMP can self-serve the controller (Distpath points at a real
+    # dist with index.html), use the WebSocket port — single URL for the
+    # iPad, no Vite needed. Otherwise fall back to the dev-mode Uiport
+    # (external Vite at 5173 by default).
+    if _dist_root(comp) is not None:
+        port = 9980
+        ws = comp.op('webserver1') if comp is not None else None
+        if ws is not None and hasattr(ws.par, 'port'):
+            try:
+                port = int(ws.par.port.eval())
+            except Exception:
+                pass
+        return f"http://{_lan_ip()}:{port}"
     port = 5173
     if hasattr(comp.par, 'Uiport'):
         try:
@@ -568,12 +585,137 @@ def onGeneratePulse():
     _handle_generate(ws, client=None, msg={'prompt': prompt, 'history': []})
 
 
-# Web Server DAT also calls these; keep no-ops so TD doesn't warn.
-def onHTTPRequest(webServerDAT, request, response):
+# ---------------------------------------------------------------------------
+# Static file serving — the COMP doubles as an HTTP server for the built
+# controller (Vite dist/). When Distpath resolves to a folder containing
+# index.html, every GET is served from disk; otherwise we return a help
+# stub so the user knows what to set.
+# ---------------------------------------------------------------------------
+
+_MIME_OVERRIDES = {
+    '.js':    'text/javascript',
+    '.mjs':   'text/javascript',
+    '.css':   'text/css',
+    '.html':  'text/html; charset=utf-8',
+    '.htm':   'text/html; charset=utf-8',
+    '.json':  'application/json',
+    '.map':   'application/json',
+    '.svg':   'image/svg+xml',
+    '.png':   'image/png',
+    '.jpg':   'image/jpeg',
+    '.jpeg':  'image/jpeg',
+    '.gif':   'image/gif',
+    '.webp':  'image/webp',
+    '.ico':   'image/x-icon',
+    '.woff':  'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf':   'font/ttf',
+    '.txt':   'text/plain; charset=utf-8',
+    '.wasm':  'application/wasm',
+}
+_TEXT_EXTS = {'.js', '.mjs', '.css', '.html', '.htm', '.json', '.map', '.svg', '.txt'}
+
+
+def _dist_root(comp):
+    """Resolve the COMP's Distpath param against the saved project location.
+    Return the absolute folder path only if it exists and contains
+    index.html — otherwise None (HTTP handler falls back to a help stub)."""
+    if comp is None or not hasattr(comp.par, 'Distpath'):
+        return None
+    raw = (comp.par.Distpath.eval() or '').strip()
+    if not raw:
+        return None
+    try:
+        abs_path = tdu.expandPath(raw)  # noqa: F821 — TD global
+    except Exception:
+        return None
+    if not os.path.isdir(abs_path):
+        return None
+    if not os.path.isfile(os.path.join(abs_path, 'index.html')):
+        return None
+    return abs_path
+
+
+def _http_error(response, code: int, reason: str, body: str = '') -> dict:
+    response['statusCode'] = code
+    response['statusReason'] = reason
+    response['data'] = body or (reason + '\n')
+    response['headers'] = {'Content-Type': 'text/plain; charset=utf-8'}
+    return response
+
+
+def _serve_static(request, response, dist_root: str) -> dict:
+    raw_uri = request.get('uri') or '/'
+    path_only = urlsplit(raw_uri).path or '/'
+    decoded = unquote(path_only)
+    # Reject backslash in the URL outright. URL paths are forward-slash;
+    # backslash here would let an attacker smuggle a Windows path separator
+    # past posixpath.normpath (which treats '\' as a regular character) and
+    # have it interpreted as a directory boundary by os.path.realpath later.
+    if '\\' in decoded:
+        return _http_error(response, 403, 'Forbidden')
+    if decoded.endswith('/'):
+        decoded += 'index.html'
+    # posixpath.normpath collapses ../ — afterwards, anything starting with
+    # '..' means the request tried to escape the dist root.
+    normalized = posixpath.normpath(decoded)
+    if normalized.startswith('..'):
+        return _http_error(response, 403, 'Forbidden')
+    rel = normalized.lstrip('/')
+    abs_path = os.path.realpath(os.path.join(dist_root, rel))
+    dist_real = os.path.realpath(dist_root)
+    # Belt-and-suspenders: even after normalization, ensure the resolved
+    # path is still under dist_root (catches symlinks pointing outside).
+    # os.path.normcase makes the comparison case-insensitive on Windows
+    # (where the filesystem ignores case but realpath preserves the on-disk
+    # spelling, which may differ from what the user typed into Distpath).
+    abs_cmp  = os.path.normcase(abs_path)
+    dist_cmp = os.path.normcase(dist_real)
+    if not (abs_cmp == dist_cmp or abs_cmp.startswith(dist_cmp + os.sep)):
+        return _http_error(response, 403, 'Forbidden')
+    if not os.path.isfile(abs_path):
+        return _http_error(response, 404, 'Not Found', f'not found: {rel}\n')
+
+    ext = os.path.splitext(abs_path)[1].lower()
+    mime = _MIME_OVERRIDES.get(ext) or mimetypes.guess_type(abs_path)[0] or 'application/octet-stream'
+
+    if ext in _TEXT_EXTS:
+        with open(abs_path, 'r', encoding='utf-8') as f:
+            data = f.read()
+    else:
+        with open(abs_path, 'rb') as f:
+            data = f.read()
+
+    # Vite emits hashed names under /assets/* — safe to long-cache.
+    # Everything else (notably index.html) must always revalidate so a fresh
+    # build reaches the iPad without manual cache-busting.
+    cache = 'public, max-age=31536000, immutable' if rel.startswith('assets/') else 'no-cache'
+
     response['statusCode'] = 200
     response['statusReason'] = 'OK'
-    response['data'] = 'Unicorner controller web server is up. Use WebSocket.'
+    response['data'] = data
+    response['headers'] = {'Content-Type': mime, 'Cache-Control': cache}
     return response
+
+
+def onHTTPRequest(webServerDAT, request, response):
+    comp = _comp()
+    dist_root = _dist_root(comp)
+    if dist_root is None:
+        # No bundled UI — serve a help stub so curl-based debugging shows
+        # what's missing instead of a silent 200.
+        response['statusCode'] = 200
+        response['statusReason'] = 'OK'
+        response['data'] = (
+            "Unicorner controller WebSocket is up on this port.\n"
+            "No controller UI bundle found.\n"
+            "  - Set the COMP's Distpath param to a folder containing the\n"
+            "    built controller (Vite dist/, must contain index.html), or\n"
+            "  - run `npm run dev` in controller/ and use the Uiport URL.\n"
+        )
+        response['headers'] = {'Content-Type': 'text/plain; charset=utf-8'}
+        return response
+    return _serve_static(request, response, dist_root)
 
 
 def onWebSocketReceiveBinary(webServerDAT, client, data):
