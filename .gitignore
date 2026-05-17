@@ -21,3 +21,11 @@ node_modules/
 
 # Vendored TouchDesigner MCP artifact — fetched by scripts/setup-td-mcp.sh
 vendor/
+
+# Local API-key config for the in-TD generator. Never check in.
+td/.unicorner_config.json
+
+# Per-scene event log written by the in-TD generator (every generate attempt
+# appends a JSONL record: prompt, raw response, outcome, error, etc.).
+# Useful for debugging model output drift; not for sharing.
+td/.unicorner_log/

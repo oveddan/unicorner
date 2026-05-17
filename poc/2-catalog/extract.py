@@ -1,13 +1,20 @@
 """
-POC 2 — Extract a parameter catalog from a live TD project, via MCP.
+POC 2 — Extract a parameter catalog from a live TD project, via MCP or in-process.
 
-Walks /project1 looking for COMPs tagged `unicorner.layer-b` and reads their
-custom parameters. Emits a dict that conforms to
+Walks a target COMP subtree looking for COMPs tagged `unicorner.layer-b` and reads
+their custom parameters. Emits a dict that conforms to
 `schemas/parameter-catalog.schema.json`.
 
-Run by handing the body of `EXTRACTOR_BODY` to the
-`mcp__touchdesigner-stdio__execute_python_script` tool. The last expression is
-the catalog dict — MCP returns it verbatim.
+Two ways to use it:
+
+1. **Via MCP** — hand the body of `EXTRACTOR_BODY` (or the output of `render()`)
+   to the `mcp__touchdesigner-stdio__execute_python_script` tool. The trailing
+   expression is the catalog dict — MCP returns it verbatim.
+
+2. **In-process inside TD** — `import poc.2-catalog.extract` doesn't work
+   (numeric prefix isn't a valid Python identifier), so the in-TD generator
+   inlines the same walker in `td/modules/unicorner_generator.py`. Keep the
+   two in sync: when you change the logic here, mirror the change there.
 
 Why the unusual shape:
 - Defs at the top level work, but if the trailing expression of the script is
@@ -18,10 +25,22 @@ Why the unusual shape:
   aren't always available in the MCP exec scope.
 """
 
+# ----- Config (substituted into the body when calling `render()`) ----------
+
+DEFAULTS = {
+    'scene_root': '/project1',          # Root of the walk. The drop-in COMP's `Target` param sets this.
+    'scene_id':   'a',                  # Scene id stamped into the catalog.
+    'scene_label': 'Test scene A',
+    'tag':        'unicorner.layer-b',  # Tag used to identify Layer B module COMPs.
+}
+
+# ----- Body fed to TD ------------------------------------------------------
+
 EXTRACTOR_BODY = r'''
-SCENE_ROOT = '/project1'
-SCENE_ID   = 'a'
-TAG        = 'unicorner.layer-b'
+SCENE_ROOT  = __SCENE_ROOT__
+SCENE_ID    = __SCENE_ID__
+SCENE_LABEL = __SCENE_LABEL__
+TAG         = __TAG__
 
 # TD parameter style → catalog `type`. Unknown styles fall through and the
 # param is skipped (we don't want to surface menu/string params yet).
@@ -75,11 +94,29 @@ modules.sort(key=lambda m: m['id'])
 catalog = {
     'schema_version': '0.1',
     'scene_id':       SCENE_ID,
-    'scene_label':    'Test scene A',
+    'scene_label':    SCENE_LABEL,
     'modules':        modules,
 }
 catalog
 '''
 
+
+def render(scene_root: str = None, scene_id: str = None, scene_label: str = None, tag: str = None) -> str:
+    """Substitute the config into the body template and return the script ready
+    to send to TD. All args fall back to `DEFAULTS`."""
+    import json
+    cfg = {**DEFAULTS}
+    if scene_root  is not None: cfg['scene_root']  = scene_root
+    if scene_id    is not None: cfg['scene_id']    = scene_id
+    if scene_label is not None: cfg['scene_label'] = scene_label
+    if tag         is not None: cfg['tag']         = tag
+    body = EXTRACTOR_BODY
+    body = body.replace('__SCENE_ROOT__',  json.dumps(cfg['scene_root']))
+    body = body.replace('__SCENE_ID__',    json.dumps(cfg['scene_id']))
+    body = body.replace('__SCENE_LABEL__', json.dumps(cfg['scene_label']))
+    body = body.replace('__TAG__',         json.dumps(cfg['tag']))
+    return body
+
+
 if __name__ == '__main__':
-    print(EXTRACTOR_BODY)
+    print(render())
