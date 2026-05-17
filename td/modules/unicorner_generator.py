@@ -274,6 +274,17 @@ Alternative labels should be 2–5 words and *concretely* describe the feel ("Br
 
 The user sees only the labels + descriptions on chips; they tap one and you'll never run the others. So make the choices *substantively different* — different param sets, different curves, different macro groupings. Two near-identical alternatives are a waste.
 
+**(c) Clarifying question** — request is too ambiguous to commit to even three alternatives. Ask one focused question with 2–4 short answer chips, no specs:
+```
+{"question":"What kind of feel are you after?","alternatives":[
+  {"id":"a","label":"More like a synth pad","description":"slow, sustained, atmospheric"},
+  {"id":"b","label":"More like a drum sequencer","description":"sharp, rhythmic, percussive"},
+  {"id":"c","label":"Audio-reactive flicker","description":"jittery, reactive to peaks"}
+]}
+```
+
+Use shape (c) only when you genuinely cannot tell what the user wants from the scene + prompt + prior history (e.g. "make it more", "do something cool"). Most ambiguous-but-bounded requests should use shape (b) instead and let the user pick a concrete option. Each answer chip's `label` should be a complete answer the user is choosing — not another question.
+
 ## Hard rules — violations make the spec unusable
 
 1. **Output exactly one JSON object** in one of the two shapes above. No prose, no markdown fences, no commentary.
@@ -307,12 +318,28 @@ Design heuristics:
 def build_messages(catalog: dict,
                    user_prompt: str,
                    history: list = None,
-                   current_spec: dict = None) -> list:
+                   current_spec: dict = None,
+                   scene_summary: str = None) -> list:
     """Pure function — no TD calls. Builds the messages list that will be
     POSTed to Anthropic. Split out from generate_spec() so the callbacks
     layer can extract the catalog on the main thread, then build messages
-    here, then ship the result to a worker thread for the HTTP call."""
-    user_turn_lines = ["Parameter catalog:", "", json.dumps(catalog, indent=2), ""]
+    here, then ship the result to a worker thread for the HTTP call.
+
+    `scene_summary`, if provided, is a plain-language description of the
+    scene (typically authored by the DJ via the "Re-scan scene" button and
+    optionally hand-edited). It's injected before the catalog as shared
+    context so the model writes a spec against the DJ's mental picture of
+    the scene rather than just the raw param dump.
+    """
+    user_turn_lines: list = []
+    if scene_summary:
+        user_turn_lines += [
+            "Shared understanding of this scene (authored or confirmed by the user — trust this):",
+            "",
+            scene_summary.strip(),
+            "",
+        ]
+    user_turn_lines += ["Parameter catalog:", "", json.dumps(catalog, indent=2), ""]
     if current_spec is not None:
         user_turn_lines += [
             "Current applied ControllerSpec (refine this rather than starting over unless asked):",
@@ -362,6 +389,31 @@ def parse_response(response_text: str, catalog: dict):
     parsed = _parse_spec(response_text, catalog)
 
     if isinstance(parsed, dict) and isinstance(parsed.get('alternatives'), list):
+        # Question shape: top-level `question` text + spec-less alternatives.
+        # The model is asking for clarification before committing to a spec.
+        question_text = parsed.get('question')
+        if isinstance(question_text, str) and question_text.strip():
+            answers = []
+            for i, alt in enumerate(parsed['alternatives']):
+                if not isinstance(alt, dict):
+                    continue
+                label = str(alt.get('label') or '').strip()
+                if not label:
+                    continue
+                answers.append({
+                    'id':          str(alt.get('id') or chr(ord('a') + i)),
+                    'label':       label,
+                    'description': str(alt.get('description') or ''),
+                    'kind':        'question',
+                })
+            if not answers:
+                raise RuntimeError("Model returned a question with no answer chips.")
+            return {
+                'mode':         'question',
+                'question':     question_text.strip(),
+                'alternatives': answers,
+            }
+
         alts_out = []
         for i, alt in enumerate(parsed['alternatives']):
             if not isinstance(alt, dict):
@@ -379,6 +431,7 @@ def parse_response(response_text: str, catalog: dict):
                 'id':          str(alt.get('id') or chr(ord('a') + i)),
                 'label':       str(alt.get('label') or f"Option {chr(ord('A') + i)}"),
                 'description': str(alt.get('description') or ''),
+                'kind':        'choice',
                 'spec':        alt_spec,
             })
         if not alts_out:
@@ -400,6 +453,7 @@ def generate_spec(scene_root: str,
                   history: list = None,
                   current_spec: dict = None,
                   scene_label: str = None,
+                  scene_summary: str = None,
                   model: str = DEFAULT_MODEL,
                   comp = None) -> dict:
     """Synchronous end-to-end: catalog → API → validated spec.
@@ -409,7 +463,7 @@ def generate_spec(scene_root: str,
     in pieces across a worker thread to avoid freezing TD's cook.
     """
     catalog  = extract_catalog(scene_root, scene_id, scene_label)
-    messages = build_messages(catalog, user_prompt, history, current_spec)
+    messages = build_messages(catalog, user_prompt, history, current_spec, scene_summary)
     response_text = _call_anthropic(messages, model=model, api_key=resolve_api_key(comp))
     parsed = parse_response(response_text, catalog)
     # Back-compat: ad-hoc callers expect a spec dict. If alternatives, return
@@ -417,7 +471,85 @@ def generate_spec(scene_root: str,
     # both modes (see controller_webserver_script._apply_pending).
     if parsed['mode'] == 'spec':
         return parsed['spec']
-    return parsed['alternatives'][0]['spec']
+    if parsed['mode'] == 'alternatives':
+        return parsed['alternatives'][0]['spec']
+    # Question mode: no spec was produced. Caller has to handle this.
+    raise RuntimeError(f"Model asked a clarifying question instead of a spec: {parsed.get('question')!r}")
+
+
+# ---------------------------------------------------------------------------
+# Scene summarization (background pre-step for the chat dialog)
+# ---------------------------------------------------------------------------
+
+SUMMARY_SYSTEM_PROMPT = """You read a TouchDesigner scene's parameter catalog and produce a short, plain-language description of what the scene is and what each subsystem does. The output is shown to a DJ who will read it, optionally correct any details that look wrong, and then ask for a controller to be generated against that shared understanding.
+
+## Output
+
+- Plain prose only. No JSON, no markdown headers, no bullet points longer than one line.
+- Keep it under ~120 words.
+- Lead with a one-sentence scene description ("This looks like a particle system with feedback and a noise-driven displacement.").
+- Then group the controllable params by subsystem and name the ones you'd modulate. Use the param's `label` or `semantic`, not the raw `path`.
+- Note when the same intuitive concept (e.g. "brightness", "speed") is controllable in multiple places — those are good macro candidates.
+- Don't invent params that aren't in the catalog.
+- Don't propose controls or speculate about how to play it — that's a later step. Just describe what's there.
+"""
+
+
+def summarize_scene(scene_root: str,
+                    scene_id: str,
+                    scene_label: str = None,
+                    model: str = DEFAULT_MODEL,
+                    comp = None) -> str:
+    """Synchronous: catalog → Anthropic → plain-language scene summary.
+
+    Production path threads this through a worker — see
+    `controller_webserver_script._handle_understand_scene`.
+    """
+    catalog = extract_catalog(scene_root, scene_id, scene_label)
+    return summarize_catalog(catalog, model=model, api_key=resolve_api_key(comp))
+
+
+def summarize_catalog(catalog: dict, model: str = DEFAULT_MODEL, api_key: str = None) -> str:
+    """Lower-level: call Anthropic to summarize an already-extracted catalog.
+    Exposed so the threaded path can do the catalog walk on the main thread
+    (TD ops) and the HTTP call on a worker.
+    """
+    if not api_key:
+        raise RuntimeError(_api_key_not_found_msg())
+    modules = catalog.get('modules') or []
+    if not modules:
+        return "The scene has no controllable parameters yet — either the target points at an empty COMP, or all ops were skipped because they have nothing modulatable."
+
+    user_turn = (
+        "Parameter catalog:\n\n"
+        + json.dumps(catalog, indent=2)
+        + "\n\nDescribe this scene in plain language for the DJ who'll play it."
+    )
+    body = {
+        'model':      model,
+        'max_tokens': 600,
+        'system':     SUMMARY_SYSTEM_PROMPT,
+        'messages':   [{'role': 'user', 'content': user_turn}],
+    }
+    req = urllib.request.Request(
+        ANTHROPIC_API_URL,
+        data=json.dumps(body).encode('utf-8'),
+        headers={
+            'x-api-key':         api_key,
+            'anthropic-version': ANTHROPIC_VERSION,
+            'content-type':      'application/json',
+        },
+        method='POST',
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=_ssl_context()) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode('utf-8', errors='replace')
+        raise RuntimeError(f"Anthropic API HTTP {e.code}: {detail}") from e
+    content = payload.get('content', [])
+    text_parts = [block.get('text', '') for block in content if block.get('type') == 'text']
+    return ''.join(text_parts).strip()
 
 
 def _call_anthropic(messages: list, model: str, api_key: str = None) -> str:

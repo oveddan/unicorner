@@ -294,6 +294,125 @@ input[type='range'] {
   cursor: pointer;
   padding: 0 6px;
 }
+.drawer-rescan {
+  background: #1c2a38;
+  color: #cfe6ff;
+  border: 1px solid #2c4660;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.drawer-rescan:hover:not(:disabled) { background: #243a52; }
+.drawer-rescan:disabled { opacity: 0.5; cursor: wait; }
+
+/* ----- Scene-understanding summary panel ----- */
+
+.drawer-summary {
+  border-bottom: 1px solid #2a2a2a;
+  padding: 10px 14px 12px;
+  background: #181c1a;
+}
+.drawer-summary-stale {
+  background: #1d1a17;
+}
+.drawer-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.drawer-summary-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.drawer-summary-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #2a4a3a;
+  color: #d8f0e0;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.drawer-summary-tag-stale {
+  background: #4d3a1f;
+  color: #fcd34d;
+}
+.drawer-summary-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.drawer-summary-btn {
+  background: transparent;
+  color: #cfd9d4;
+  border: 1px solid #2a4a3a;
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.drawer-summary-btn:hover { background: #1f2e26; }
+.drawer-summary-btn-primary {
+  background: #2a4a3a;
+  color: #d8f0e0;
+  border-color: #3a6a4a;
+}
+.drawer-summary-btn-primary:hover { background: #335c47; }
+.drawer-summary-btn-quiet {
+  border-color: #2a2a2a;
+  color: #aaa;
+}
+.drawer-summary-banner {
+  background: #2a2117;
+  color: #fcd34d;
+  border: 1px solid #4d401f;
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.drawer-summary-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: #d8e0dc;
+}
+.drawer-summary-editor {
+  width: 100%;
+  background: #0f1614;
+  color: #eee;
+  border: 1px solid #2a4a3a;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.drawer-summary-edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.drawer-summary-hint {
+  padding: 10px 14px;
+  border-bottom: 1px solid #2a2a2a;
+  background: #14181b;
+  font-size: 12px;
+  color: #9ab0c0;
+  line-height: 1.4;
+}
+.drawer-summary-hint strong { color: #cfe6ff; }
 
 .drawer-log {
   flex: 1;

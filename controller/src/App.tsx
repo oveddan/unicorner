@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
   AlternativeOption,
   Control,
   ControllerSpec,
   InboundMessage,
+  SceneSummary,
   SurfaceParam,
 } from './types'
 import { Knob } from './widgets/Knob'
@@ -20,6 +21,35 @@ import { MidiLearnModal } from './MidiLearnModal'
 const DEFAULT_SURFACE_PATH = '/project1/controller_surface'
 
 type GenStatus = 'idle' | 'thinking' | 'error'
+type SummaryStatus = 'idle' | 'thinking' | 'error'
+
+function summaryStorageKey(scene: string) {
+  return `unicorner.scene_summary.${scene || 'default'}`
+}
+
+function loadSummary(scene: string): SceneSummary | null {
+  try {
+    const raw = localStorage.getItem(summaryStorageKey(scene))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed.text === 'string') return parsed as SceneSummary
+    return null
+  } catch {
+    return null
+  }
+}
+
+function saveSummary(scene: string, s: SceneSummary | null) {
+  try {
+    if (s === null) {
+      localStorage.removeItem(summaryStorageKey(scene))
+      return
+    }
+    localStorage.setItem(summaryStorageKey(scene), JSON.stringify(s))
+  } catch {
+    /* localStorage full or disabled — degrade silently */
+  }
+}
 
 function paramToControl(param: SurfaceParam, surfacePath: string): Control {
   const path = `${surfacePath}/${param.name}`
@@ -75,6 +105,19 @@ export default function App() {
   const [genStatus, setGenStatus] = useState<GenStatus>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [learnOpen, setLearnOpen] = useState(false)
+  const [sceneSummary, setSceneSummary] = useState<SceneSummary | null>(null)
+  const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle')
+
+  // Reload (or clear) the persisted summary whenever the active scene
+  // changes. The summary is scene-scoped — same as the chat log.
+  useEffect(() => {
+    setSceneSummary(loadSummary(scene))
+  }, [scene])
+
+  const updateSceneSummary = useCallback((next: SceneSummary | null) => {
+    setSceneSummary(next)
+    saveSummary(scene, next)
+  }, [scene])
 
   const onMessage = useCallback((msg: InboundMessage) => {
     switch (msg.type) {
@@ -107,6 +150,14 @@ export default function App() {
         console.log('[app] scene_changed', msg.scene)
         setScene(msg.scene)
         if (msg.spec) setLastSpec(msg.spec)
+        // Mark the cached summary stale rather than wiping it — the user's
+        // edits stay visible, but with a banner suggesting a re-scan.
+        setSceneSummary((prev) => {
+          if (!prev) return prev
+          const next = { ...prev, stale: true }
+          saveSummary(msg.scene, next)
+          return next
+        })
         break
       case 'alternatives':
         console.log(`[app] alternatives: ${msg.alternatives.length}`, msg.alternatives)
@@ -114,6 +165,34 @@ export default function App() {
         setAlternatives(msg.alternatives)
         setGenStatus('idle')
         setErrorMsg(null)
+        break
+      case 'understand_thinking':
+        console.log('[app] understand_thinking', msg.scene)
+        setSummaryStatus('thinking')
+        setErrorMsg(null)
+        break
+      case 'scene_summary':
+        console.log('[app] scene_summary', msg.scene, msg.summary?.length, 'chars')
+        setSummaryStatus('idle')
+        setSceneSummary((prev) => {
+          // Don't overwrite a user-edited summary without confirmation —
+          // show the new text alongside the edit by replacing only when
+          // the prior summary was either absent or auto-generated.
+          if (prev && prev.editedByUser) {
+            console.warn('[app] scene_summary arrived but local edit exists; preserving edit')
+            const next = { ...prev, stale: false }
+            saveSummary(msg.scene, next)
+            return next
+          }
+          const next: SceneSummary = {
+            text:         msg.summary,
+            generatedAt:  Date.now(),
+            stale:        false,
+            editedByUser: false,
+          }
+          saveSummary(msg.scene, next)
+          return next
+        })
         break
     }
   }, [])
@@ -192,8 +271,11 @@ export default function App() {
         errorMsg={errorMsg}
         lastSpec={lastSpec}
         alternatives={alternatives}
+        sceneSummary={sceneSummary}
+        summaryStatus={summaryStatus}
         onSpecRendered={onSpecRendered}
         onAlternativesConsumed={() => setAlternatives(null)}
+        onSceneSummaryChange={updateSceneSummary}
       />
     </SendContext>
   )
