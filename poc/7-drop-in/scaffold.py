@@ -120,8 +120,32 @@ try:
 except Exception:
     pass
 
+# ----- Controller bundle (Distpath) — same-port HTTP serving -------------
+# When this resolves to a folder containing index.html, the COMP's Web
+# Server DAT serves the bundle directly on the WebSocket port (9980) —
+# no Vite dev server needed. Released zips ship a sibling folder named
+# unicorner_controller_dist next to the .tox, so the default Just Works.
+try:
+    p_distpath = setup_page.appendFolder('Distpath', label='Controller dist folder')[0]
+except AttributeError:
+    p_distpath = setup_page.appendStr('Distpath', label='Controller dist folder')[0]
+p_distpath.default = './unicorner_controller_dist'
+p_distpath.val     = './unicorner_controller_dist'
+try:
+    p_distpath.help = (
+        "Folder containing the built controller (Vite dist/, must have "
+        "index.html). Resolved against the .toe's location via tdu.expandPath. "
+        "When set and valid, the COMP serves the controller on the same port "
+        "as the WebSocket — clear this field to fall back to external Vite "
+        "(see Uiport)."
+    )
+except Exception:
+    pass
+
 # ----- Controller URL block (also on Setup page) -------------------------
-p_uiport = setup_page.appendInt('Uiport', label='Controller UI port')[0]
+# Uiport is the *dev-mode* fallback — only consulted when Distpath is empty
+# or doesn't resolve. Defaults to Vite's dev server port.
+p_uiport = setup_page.appendInt('Uiport', label='Controller UI port (dev / Vite)')[0]
 p_uiport.default = 5173
 p_uiport.val     = 5173
 p_uiport.normMin = 1; p_uiport.normMax = 65535

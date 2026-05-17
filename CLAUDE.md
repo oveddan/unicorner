@@ -53,7 +53,9 @@ Heads-up: TD String params save into the `.toe` as plaintext. For projects you c
 
 Resolution order: COMP param → env var → config file. First non-empty value wins.
 
-The browser-side POCs (`poc/N-*/poc*.html`) are static files openable in Chrome or Safari, including from an iPad on the same network. The full React renderer lives in [controller/](controller/) — `npm run dev` from there.
+The browser-side POCs (`poc/N-*/poc*.html`) are static files openable in Chrome or Safari, including from an iPad on the same network. The full React renderer lives in [controller/](controller/) — `npm run dev` from there for HMR, or `npm run build` and let the COMP serve `controller/dist/` directly on port 9980 (the COMP's `Distpath` param defaults to `./unicorner_controller_dist` next to the .toe; the released zip uses that same layout).
+
+**Releases.** Every push to `main` triggers [.github/workflows/release.yml](.github/workflows/release.yml), which builds the controller and attaches a zip (`unicorner_controller.tox` + `unicorner_controller_dist/`) plus the bare `.tox` to a fresh GitHub Release. CI can't run TouchDesigner, so the committed `td/unicorner_controller.tox` is the source of truth: **after any change to the COMP's structure or its embedded Python (scaffold.py, the modules under `td/modules/`), open `td/main.toe`, re-run `poc/7-drop-in/scaffold.py` via MCP, and commit the regenerated `td/unicorner_controller.tox`** — otherwise the next release ships a stale COMP.
 
 ## Troubleshooting
 

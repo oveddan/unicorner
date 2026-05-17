@@ -1,0 +1,79 @@
+name: release
+
+# On every push to main: build the controller, bundle it with the committed
+# unicorner_controller.tox, attach both to a fresh GitHub Release.
+#
+# The .tox itself is regenerated locally (TD must be open) — `scaffold.py`
+# saves to td/unicorner_controller.tox, which is committed. CI can't run
+# TouchDesigner, so it just ships whatever .tox is in the repo.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: controller/package-lock.json
+
+      - name: Build controller
+        working-directory: controller
+        run: |
+          npm ci
+          npm run build
+
+      - name: Compute version
+        id: version
+        run: |
+          VERSION="v0.0.$(date -u +%Y%m%d).${GITHUB_SHA::7}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage release bundle
+        run: |
+          mkdir -p release
+          mv controller/dist release/unicorner_controller_dist
+          cp td/unicorner_controller.tox release/
+          cat > release/README.txt <<'EOF'
+          Unicorner controller — drop-in bundle
+
+          1. Open your TouchDesigner project (.toe).
+          2. Drag unicorner_controller.tox onto /project1.
+          3. Keep the unicorner_controller_dist/ folder in the SAME folder as
+             your .toe — the COMP's Distpath param defaults to
+             ./unicorner_controller_dist and resolves relative to the .toe.
+          4. On the COMP's Setup page, paste your Anthropic API key, click
+             Save Key, then click "Open in browser" (or open the shown URL
+             on your iPad over the same Wi-Fi).
+          EOF
+
+      - name: Zip release
+        run: |
+          cd release
+          zip -r "../unicorner-controller-${{ steps.version.outputs.version }}.zip" .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            unicorner-controller-${{ steps.version.outputs.version }}.zip
+            td/unicorner_controller.tox
