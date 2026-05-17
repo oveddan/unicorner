@@ -908,6 +908,17 @@ def onWebSocketReceivePong(webServerDAT, client, data):
 
 def onServerStart(webServerDAT):
     print("HTTP server started")
+    # Auto-compute and refresh the Url param so it always reflects the
+    # current machine's LAN IP — even if the .tox was saved on a different
+    # machine with a different IP baked in.
+    comp = _comp()
+    if comp is not None and hasattr(comp.par, 'Url'):
+        url = _compute_url(comp)
+        try:
+            comp.par.Url.val = url
+        except Exception:
+            pass
+        print(f"HTTP controller URL: {url}")
 
 
 def onServerStop(webServerDAT):
