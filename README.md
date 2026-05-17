@@ -16,23 +16,36 @@ A DJ playing in [djay Pro](https://www.algoriddim.com/) gets a small, well-desig
 
 The DJ never has to think about visuals as a second instrument — they just play.
 
-## Architecture (three layers)
+## How it works
 
-```
-Layer A — Algoriddim signals
-  djay Pro → TouchDesigner via the built-in TD ↔ Algoriddim integration
-  (BPM, beat grid, stems, key, EQ, faders, FX, cues, ...)
-  + audio feature extraction (RMS, onsets, spectral, transients)
-        │
-        ▼
-Layer B — Generic visual modules in TouchDesigner
-  reusable visuals that consume Layer A signals and expose a
-  machine-readable parameter catalog (name, type, range, semantic tag)
-        │
-        ▼
-Layer C — AI-generated controller
-  LLM reads Layer B's parameter catalog → emits a ControllerSpec (JSON)
-  Renderer turns the spec into a live web UI that writes back to TD via WebSocket
+Three layers. The music flows down the left spine (A → B → visuals). The unique part is the loop on the right: Layer B publishes a machine-readable parameter catalog, an LLM turns it into a controller spec, and the rendered UI writes back into the same visual modules over WebSocket. Swap the scene → new catalog → AI regenerates the controller.
+
+```mermaid
+flowchart TD
+    subgraph A["Layer A — signals"]
+        djay["djay Pro"]
+        audio["audio feature<br/>extraction"]
+        tdA["TouchDesigner<br/>BPM · stems · EQ · FX · cues"]
+        djay --> tdA
+        audio --> tdA
+    end
+
+    subgraph B["Layer B — visual scene"]
+        modules["generic visual modules<br/>intensity · color · density · decay"]
+        catalog[("parameter catalog<br/>JSON")]
+        modules -->|exposes| catalog
+    end
+
+    subgraph C["Layer C — AI-generated controller"]
+        llm{{"LLM (Claude)"}}
+        spec[("ControllerSpec<br/>JSON")]
+        ui["live web UI<br/>knobs · pads · macros"]
+        llm --> spec --> ui
+    end
+
+    tdA -->|drives| modules
+    catalog -->|prompt| llm
+    ui -->|WebSocket writes| modules
 ```
 
 ## Versions
