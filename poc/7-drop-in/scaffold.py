@@ -129,8 +129,8 @@ try:
     p_distpath = setup_page.appendFolder('Distpath', label='Controller dist folder')[0]
 except AttributeError:
     p_distpath = setup_page.appendStr('Distpath', label='Controller dist folder')[0]
-p_distpath.default = './unicorner_controller_dist'
-p_distpath.val     = './unicorner_controller_dist'
+p_distpath.default = 'unicorner_controller_dist'
+p_distpath.val     = 'unicorner_controller_dist'
 try:
     p_distpath.help = (
         "Folder containing the built controller (Vite dist/, must have "

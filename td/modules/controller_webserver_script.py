@@ -904,14 +904,26 @@ _TEXT_EXTS = {'.js', '.mjs', '.css', '.html', '.htm', '.json', '.map', '.svg', '
 def _dist_root(comp):
     """Resolve the COMP's Distpath param against the saved project location.
     Return the absolute folder path only if it exists and contains
-    index.html — otherwise None (HTTP handler falls back to a help stub)."""
+    index.html — otherwise None (HTTP handler falls back to a help stub).
+
+    We resolve relative paths against project.folder (the .toe directory)
+    rather than tdu.expandPath so that the result is reliable on Windows —
+    tdu.expandPath can embed a literal './' in the returned string which
+    os.path.isdir then rejects, and its base varies depending on how the
+    .tox was loaded.
+    """
     if comp is None or not hasattr(comp.par, 'Distpath'):
         return None
     raw = (comp.par.Distpath.eval() or '').strip()
     if not raw:
         return None
     try:
-        abs_path = tdu.expandPath(raw)  # noqa: F821 — TD global
+        if os.path.isabs(raw):
+            abs_path = os.path.normpath(raw)
+        else:
+            abs_path = os.path.normpath(
+                os.path.join(project.folder, raw)  # noqa: F821 — TD global
+            )
     except Exception:
         return None
     if not os.path.isdir(abs_path):
