@@ -189,6 +189,21 @@ try:
 except Exception:
     pass
 
+p_depth = page.appendMenu('Depth', label='Catalog depth')[0]
+p_depth.menuNames  = ['full', 'curated', 'minimal']
+p_depth.menuLabels = ['Full (all params)', 'Curated (drop builtins on plain ops)', 'Minimal (curated ops only)']
+p_depth.default = 0
+p_depth.val     = 0
+try:
+    p_depth.help = (
+        "Controls how much of the scene is sent to the AI. "
+        "'Full' sends every modulatable param — best quality, highest token cost. "
+        "'Curated' drops auto-detected builtin params on ops the scene author didn't tag — good balance. "
+        "'Minimal' sends only ops the scene author explicitly tagged — smallest catalog, use when hitting rate limits."
+    )
+except Exception:
+    pass
+
 p_prompt = page.appendStr('Prompt', label='Prompt (TD-native)')[0]
 p_prompt.default = ''
 

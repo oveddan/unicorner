@@ -119,17 +119,24 @@ def _config() -> dict:
             djay_path = (comp.par.Djaypath.eval() or '').strip()
         except Exception:
             djay_path = ''
+    catalog_depth = 'full'
+    if hasattr(comp.par, 'Depth'):
+        try:
+            catalog_depth = comp.par.Depth.eval() or 'full'
+        except Exception:
+            catalog_depth = 'full'
     scene_root  = scene or target
     scene_id    = (scene.rsplit('/', 1)[-1] if scene else (target.rsplit('/', 1)[-1] or 'scene'))
     scene_parent = scene or target  # surface lives directly under the scene root
     return {
-        'comp':         comp,
-        'target':       target,
-        'scene':        scene,
-        'scene_root':   scene_root,
-        'scene_parent': scene_parent,
-        'scene_id':     scene_id,
-        'djay_path':    djay_path,
+        'comp':          comp,
+        'target':        target,
+        'scene':         scene,
+        'scene_root':    scene_root,
+        'scene_parent':  scene_parent,
+        'scene_id':      scene_id,
+        'djay_path':     djay_path,
+        'catalog_depth': catalog_depth,
     }
 
 
@@ -252,7 +259,10 @@ def _handle_generate(ws_dat, client, msg) -> None:
     # Phase 1: main-thread prep (catalog walk + API key + messages).
     scene_summary = msg.get('scene_summary') if isinstance(msg.get('scene_summary'), str) else None
     try:
-        catalog    = gen.extract_catalog(cfg['scene_root'], cfg['scene_id'])
+        catalog    = gen.trim_catalog(
+            gen.extract_catalog(cfg['scene_root'], cfg['scene_id']),
+            cfg.get('catalog_depth', 'full'),
+        )
         dj_catalog = gen.extract_djay_catalog(cfg.get('djay_path') or '')
         api_key    = gen.resolve_api_key(cfg.get('comp'))
         messages   = gen.build_messages(
@@ -545,7 +555,10 @@ def _handle_understand_scene(ws_dat, client, msg) -> None:
 
     cfg = _config()
     try:
-        catalog = gen.extract_catalog(cfg['scene_root'], cfg['scene_id'])
+        catalog = gen.trim_catalog(
+            gen.extract_catalog(cfg['scene_root'], cfg['scene_id']),
+            cfg.get('catalog_depth', 'full'),
+        )
         api_key = gen.resolve_api_key(cfg.get('comp'))
     except Exception as e:
         traceback.print_exc()

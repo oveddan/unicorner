@@ -203,6 +203,31 @@ def extract_catalog(scene_root: str, scene_id: str, scene_label: str = None) -> 
     }
 
 
+def trim_catalog(catalog: dict, mode: str = 'full') -> dict:
+    """Reduce catalog size to stay within API token-rate limits.
+
+    mode='full'    — no change (default)
+    mode='curated' — drop builtin params from non-curated modules; keeps
+                     custom params on every module
+    mode='minimal' — keep only curated modules; drop all builtin params
+                     everywhere (smallest possible catalog)
+    """
+    if mode == 'full':
+        return catalog
+    modules = catalog.get('modules') or []
+    result = []
+    for m in modules:
+        curated = m.get('curated', False)
+        if mode == 'minimal' and not curated:
+            continue
+        params = [p for p in (m.get('parameters') or [])
+                  if p.get('source') != 'builtin']
+        if not params:
+            continue
+        result.append({**m, 'parameters': params})
+    return {**catalog, 'modules': result}
+
+
 def _empty_catalog(scene_id: str, scene_label: str = None) -> dict:
     return {
         'schema_version': '0.1',
