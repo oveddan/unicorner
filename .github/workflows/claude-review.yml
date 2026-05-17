@@ -21,17 +21,7 @@ jobs:
       - name: Claude review
         uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: |
-            Review this pull request. Focus on:
-            - Correctness and likely bugs
-            - Security issues (secrets, injection, unsafe input handling)
-            - Adherence to patterns already used in the codebase
-            - Anything that breaks the hackathon project's POC discipline (see CLAUDE.md)
-
-            Be concise. Skip nits. Don't restate what the diff already shows.
-
-            Ignore changes to: vendor/, dist/, build/, node_modules/,
-            package-lock.json, *.toe, *.tox, *.[0-9].toe, *.[0-9][0-9].toe.
-          claude_args: |
-            --allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
+          prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
