@@ -228,7 +228,7 @@ if hasattr(ws.par, 'callbacks'):
 parexec = comp.create('parameterexecuteDAT', 'parexec1')
 parexec.nodeX = 200; parexec.nodeY = -100
 if hasattr(parexec.par, 'op'):
-    parexec.par.op = comp.path
+    parexec.par.op = '..'
 for attr_name, attr_val in (
     ('pars',       'Scene Generate Savekey Openbrowser Refreshurl'),
     ('parameters', 'Scene Generate Savekey Openbrowser Refreshurl'),
