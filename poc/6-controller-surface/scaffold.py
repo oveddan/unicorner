@@ -1,16 +1,20 @@
 """
-POC 6 — Build/rebuild /project1/controller_surface and its parameter bindings.
+POC 6 — Build/rebuild a controller-surface COMP and its parameter bindings.
 
 The controller-surface COMP is the single contract between the iPad React app
-and TouchDesigner. Its custom params are the controls the iPad renders (via
-the schema push from `poc/0-ws-roundtrip/ws_callbacks.py`), and each one is
-expression-bound to a target param somewhere downstream — typically a Layer B
-module's custom param (clean Layer B contract), occasionally an internal
-render node (quick path).
+and TouchDesigner. Its custom params are the controls the iPad renders, and
+each one is expression-bound to a target param somewhere downstream —
+typically a Layer B module's custom param (clean Layer B contract), occasionally
+an internal render node (quick path).
 
-Edit `PARAMS` and `BINDINGS` below to match your scene, then hand
-`SCAFFOLD_BODY` to `mcp__touchdesigner-stdio__execute_python_script`.
-Idempotent — tears down the existing COMP and rebuilds.
+**Parent path is configurable.** Each scene COMP gets its own surface as a
+child, e.g. `/project1/sceneA/controller_surface`, `/project1/sceneB/controller_surface`.
+The drop-in `unicorner_controller.tox` selects which child surface the iPad
+talks to via its `Scene` parameter.
+
+Edit `PARAMS` and `BINDINGS` below to match your scene, then hand the rendered
+body to `mcp__touchdesigner-stdio__execute_python_script`. Idempotent — tears
+down the existing COMP at `<parent>/<surface_name>` and rebuilds.
 
 This script does NOT modify Layer B modules. If you want a new knob to drive
 a Layer B custom param that doesn't exist yet, add the custom param on the
@@ -38,7 +42,7 @@ TOGGLES = [
 
 # Bindings: each surface param drives one target via a parameter expression.
 # Each entry: (surface_param_name, target_node_path, target_par_name).
-# The target par switches to ParMode.EXPRESSION reading from controller_surface.
+# The target par switches to ParMode.EXPRESSION reading from the surface.
 
 BINDINGS = [
     ('Phase',     '/project1/container1/constant1', 'value0'),
@@ -47,11 +51,15 @@ BINDINGS = [
     ('Decay',     '/project1/container1',           'Decay'),
 ]
 
+# Default parent for the surface COMP. The drop-in .tox overrides this per-scene.
+DEFAULT_PARENT = '/project1'
+DEFAULT_SURFACE_NAME = 'controller_surface'
+
 # ----- Body fed to TD ------------------------------------------------------
 
 SCAFFOLD_BODY = r'''
-PARENT_PATH   = '/project1'
-SURFACE_NAME  = 'controller_surface'
+PARENT_PATH   = __PARENT_PATH__
+SURFACE_NAME  = __SURFACE_NAME__
 TAG           = 'unicorner.controller-surface'
 PAGE_NAME     = 'Surface'
 
@@ -59,19 +67,24 @@ PARAMS   = __PARAMS__
 TOGGLES  = __TOGGLES__
 BINDINGS = __BINDINGS__
 
+SURFACE_PATH = f'{PARENT_PATH}/{SURFACE_NAME}'
+
 parent = op(PARENT_PATH)
+if parent is None:
+    raise RuntimeError(f"scaffold: parent COMP not found at {PARENT_PATH!r}")
+
 existing = parent.op(SURFACE_NAME)
 
 # Clear stale expressions that pointed at the old surface, so destroying it
 # doesn't leave dangling expression references that fire on every cook.
 if existing is not None:
-    CONSTANT = type(op(PARENT_PATH).par.helpdat.mode).CONSTANT  # any par; mode enum
+    CONSTANT = type(parent.par.helpdat.mode).CONSTANT  # any par; mode enum
     for surface_param_name, target_node, target_par in BINDINGS:
         node = op(target_node)
         if node is None: continue
         par = getattr(node.par, target_par, None)
         if par is None: continue
-        if "EXPRESSION" in str(par.mode) and surface_param_name in (par.expr or ''):
+        if "EXPRESSION" in str(par.mode) and SURFACE_PATH in (par.expr or ''):
             par.expr = ''
             par.mode = CONSTANT
     existing.destroy()
@@ -107,21 +120,27 @@ for surface_param_name, target_node, target_par in BINDINGS:
     if par is None:
         debug(f"scaffold: target par not found: {target_node}.{target_par}")
         continue
-    par.expr = f"op('{PARENT_PATH}/{SURFACE_NAME}').par.{surface_param_name}"
+    par.expr = f"op('{SURFACE_PATH}').par.{surface_param_name}"
     par.mode = EXPRESSION
 
 [(p.name, p.label, p.default, p.normMin, p.normMax) for p in surface.customPars]
 '''
 
 
-def render() -> str:
-    """Substitute the Python literals into the body template and return the
-    full script ready to send to TD. Use this when calling via MCP."""
+def render(parent_path: str = None,
+           surface_name: str = None,
+           params: list = None,
+           toggles: list = None,
+           bindings: list = None) -> str:
+    """Substitute Python literals into the body template and return the full
+    script ready to send to TD. Use this when calling via MCP."""
     import json
     body = SCAFFOLD_BODY
-    body = body.replace('__PARAMS__',   json.dumps(PARAMS))
-    body = body.replace('__TOGGLES__',  json.dumps(TOGGLES))
-    body = body.replace('__BINDINGS__', json.dumps(BINDINGS))
+    body = body.replace('__PARENT_PATH__',  json.dumps(parent_path  or DEFAULT_PARENT))
+    body = body.replace('__SURFACE_NAME__', json.dumps(surface_name or DEFAULT_SURFACE_NAME))
+    body = body.replace('__PARAMS__',       json.dumps(params   if params   is not None else PARAMS))
+    body = body.replace('__TOGGLES__',      json.dumps(toggles  if toggles  is not None else TOGGLES))
+    body = body.replace('__BINDINGS__',     json.dumps(bindings if bindings is not None else BINDINGS))
     return body
 
 

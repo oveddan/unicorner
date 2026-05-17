@@ -1,0 +1,4 @@
+{
+  "_comment": "Copy this file to .unicorner_config.json (gitignored) and fill in your key. The in-TD generator (td/modules/unicorner_generator.py) reads it on demand.",
+  "anthropic_api_key": "sk-ant-..."
+}

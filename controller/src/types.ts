@@ -70,6 +70,21 @@ export type SetMessage = {
   value: number | boolean
 }
 
+export type GenerateMessage = {
+  type: 'generate'
+  prompt: string
+  scene: string
+  history: Array<{ role: 'user' | 'assistant'; content: string }>
+}
+
+export type PickAlternativeMessage = {
+  type: 'pick_alternative'
+  scene: string
+  alt_id: string
+}
+
+export type OutboundMessage = SetMessage | GenerateMessage | PickAlternativeMessage
+
 export type SurfaceParamType = 'float' | 'int' | 'bool' | 'pulse'
 
 export type SurfaceParam = {
@@ -83,7 +98,49 @@ export type SurfaceParam = {
 
 export type SchemaMessage = {
   type: 'schema'
+  scene?: string
+  surface_path?: string
   params: SurfaceParam[]
 }
 
-export type InboundMessage = SchemaMessage
+export type ThinkingMessage = {
+  type: 'thinking'
+  scene?: string
+}
+
+export type SpecMessage = {
+  type: 'spec'
+  scene: string
+  spec: ControllerSpec
+}
+
+export type ErrorMessage = {
+  type: 'error'
+  msg: string
+}
+
+export type SceneChangedMessage = {
+  type: 'scene_changed'
+  scene: string
+  spec?: ControllerSpec
+}
+
+export type AlternativeOption = {
+  id: string
+  label: string
+  description: string
+}
+
+export type AlternativesMessage = {
+  type: 'alternatives'
+  scene: string
+  alternatives: AlternativeOption[]
+}
+
+export type InboundMessage =
+  | SchemaMessage
+  | ThinkingMessage
+  | SpecMessage
+  | ErrorMessage
+  | SceneChangedMessage
+  | AlternativesMessage

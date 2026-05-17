@@ -235,3 +235,201 @@ input[type='range'] {
   padding: 0;
 }
 .expand-btn:hover { background: #2a2a2a; }
+
+/* ----- Designer drawer ----- */
+
+.gear {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #3a3a3a;
+  font-size: 22px;
+  cursor: pointer;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gear:hover { background: #333; }
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(420px, 90vw);
+  background: #161616;
+  border-left: 1px solid #2a2a2a;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 180ms ease;
+  z-index: 40;
+}
+.drawer-open { transform: translateX(0); }
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #2a2a2a;
+}
+.drawer-scene {
+  opacity: 0.6;
+  font-size: 12px;
+  margin-left: auto;
+  margin-right: 4px;
+}
+.drawer-close {
+  background: transparent;
+  color: #eee;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  padding: 0 6px;
+}
+
+.drawer-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.drawer-empty {
+  opacity: 0.55;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.drawer-turn {
+  background: #1e1e1e;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.drawer-turn-user { border-color: #2a3a55; }
+.drawer-turn-assistant { border-color: #2a4a3a; }
+.drawer-error { border-color: #4d1f1f; color: #ff8888; }
+.drawer-thinking { opacity: 0.7; font-style: italic; }
+.drawer-turn-alternatives { border-color: #3a3a55; }
+
+.drawer-alternatives {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.drawer-alt-chip {
+  background: #1a1a26;
+  color: #d8d8f0;
+  border: 1px solid #3a3a55;
+  border-radius: 6px;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: inherit;
+}
+.drawer-alt-chip:hover:not(:disabled) {
+  background: #232338;
+  border-color: #4d4d80;
+}
+.drawer-alt-chip:disabled { cursor: default; }
+.drawer-alt-picked {
+  background: #2a4a3a !important;
+  border-color: #3a6a4a !important;
+  color: #d8f0e0 !important;
+}
+.drawer-alt-dimmed { opacity: 0.4; }
+.drawer-alt-label {
+  font-weight: 600;
+  font-size: 14px;
+}
+.drawer-alt-desc {
+  font-size: 12px;
+  opacity: 0.7;
+  line-height: 1.35;
+}
+.drawer-turn-role {
+  font-size: 11px;
+  opacity: 0.55;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.drawer-turn-content {
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.drawer-input {
+  padding: 12px 14px;
+  border-top: 1px solid #2a2a2a;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.drawer-input textarea {
+  background: #1a1a1a;
+  color: #eee;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+  resize: vertical;
+}
+.drawer-input-row {
+  display: flex;
+  gap: 8px;
+}
+.drawer-input button {
+  background: #2a4a3a;
+  color: #d8f0e0;
+  border: 1px solid #3a6a4a;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.drawer-input button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.drawer-clear {
+  margin-left: auto;
+  background: transparent !important;
+  color: #aaa !important;
+  border-color: #2a2a2a !important;
+}
+
+/* ----- Regen overlay on the controls grid ----- */
+
+.grid-regen { opacity: 0.55; pointer-events: none; transition: opacity 120ms ease; }
+
+.regen-overlay {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1a1a1a;
+  color: #fcd34d;
+  border: 1px solid #4d401f;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  z-index: 20;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 0.45; }
+}

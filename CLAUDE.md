@@ -38,9 +38,22 @@ Three pieces have to be in place: the TouchDesigner side, the Claude Code MCP wi
 
 ## Day-to-day
 
-- Open `td/main.toe` to start working. The MCP bridge starts automatically when the `mcp_webserver_base` COMP loads.
-- Run the POC scaffolds via the `mcp__touchdesigner-stdio__execute_python_script` tool, feeding it the contents of e.g. `poc/1-mcp-scaffold/scaffold.py`.
-- The browser-side POCs (`poc/N-*/poc*.html`) are static files openable in Chrome or Safari, including from an iPad on the same network.
+Two parallel flows now exist:
+
+**Build-time (Claude Code + MCP, port 9981).** Open `td/main.toe`. Run POC scaffolds via the `mcp__touchdesigner-stdio__execute_python_script` tool — feed it the body of e.g. [poc/1-mcp-scaffold/scaffold.py](poc/1-mcp-scaffold/scaffold.py) or [poc/7-drop-in/scaffold.py](poc/7-drop-in/scaffold.py). Powered by the `mcp_webserver_base` COMP.
+
+**Runtime (drop-in `.tox`, port 9980).** The `unicorner_controller` COMP hosts the iPad WebSocket and runs the in-TD generator. It calls the Anthropic Messages API directly via stdlib `urllib` — no Claude Code, no Node MCP server, no `pip install` needed inside TD. The DJ / scene-author iterates on the controller from the iPad's ⚙ designer drawer (chat-style prompt + per-scene history). See [poc/7-drop-in/README.md](poc/7-drop-in/README.md) for the drop-in flow.
+
+**Prerequisite for the runtime flow** — an Anthropic API key. The default place to put it is **the `Apikey` parameter on the `unicorner_controller` COMP** (Setup page). After dragging the .tox onto a project, that field is the only thing you must set before the iPad can generate a controller.
+
+Heads-up: TD String params save into the `.toe` as plaintext. For projects you commit or share, leave `Apikey` blank and use one of the escape hatches instead:
+
+- **`ANTHROPIC_API_KEY` env var** in the shell that launches TouchDesigner. If TD was launched from Finder, shell init isn't inherited — relaunch via `open -a TouchDesigner` from a terminal that has the env, or use `launchctl setenv ANTHROPIC_API_KEY …`.
+- **`td/.unicorner_config.json`** (gitignored). Copy [td/.unicorner_config.example.json](td/.unicorner_config.example.json) → `td/.unicorner_config.json` and fill in the key. Survives Finder launches.
+
+Resolution order: COMP param → env var → config file. First non-empty value wins.
+
+The browser-side POCs (`poc/N-*/poc*.html`) are static files openable in Chrome or Safari, including from an iPad on the same network. The full React renderer lives in [controller/](controller/) — `npm run dev` from there.
 
 ## Troubleshooting
 

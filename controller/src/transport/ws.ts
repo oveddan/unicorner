@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { InboundMessage, SetMessage } from '../types'
+import type { InboundMessage, OutboundMessage } from '../types'
 
 export type WSStatus = 'connecting' | 'open' | 'closed'
 
@@ -68,7 +68,7 @@ export function useTDSocket(options: Options = {}) {
     }
   }, [])
 
-  const send = (msg: SetMessage) => {
+  const send = (msg: OutboundMessage) => {
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg))

@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
-import type { SetMessage } from '../types'
+import type { OutboundMessage } from '../types'
 
-export type SendFn = (msg: SetMessage) => void
+export type SendFn = (msg: OutboundMessage) => void
 
 export const SendContext = createContext<SendFn>(() => {})
 
