@@ -48,7 +48,9 @@ Two parallel flows now exist:
 
 Heads-up: TD String params save into the `.toe` as plaintext. For projects you commit or share, leave `Apikey` blank and use one of the escape hatches instead:
 
-- **`ANTHROPIC_API_KEY` env var** in the shell that launches TouchDesigner. If TD was launched from Finder, shell init isn't inherited — relaunch via `open -a TouchDesigner` from a terminal that has the env, or use `launchctl setenv ANTHROPIC_API_KEY …`.
+- **`ANTHROPIC_API_KEY` env var** in the shell that launches TouchDesigner.
+  - macOS: if TD was launched from Finder, shell init isn't inherited — relaunch via `open -a TouchDesigner` from a terminal that has the env, or use `launchctl setenv ANTHROPIC_API_KEY …`.
+  - Windows: persist with `setx ANTHROPIC_API_KEY "sk-ant-…"` (new shells / new TD launches inherit it), or set per-session with `$env:ANTHROPIC_API_KEY = "sk-ant-…"` in the PowerShell that launches TD.
 - **`td/.unicorner_config.json`** (gitignored). Copy [td/.unicorner_config.example.json](td/.unicorner_config.example.json) → `td/.unicorner_config.json` and fill in the key. Survives Finder launches.
 
 Resolution order: COMP param → env var → config file. First non-empty value wins.
