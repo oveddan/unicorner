@@ -59,6 +59,8 @@ The browser-side POCs (`poc/N-*/poc*.html`) are static files openable in Chrome 
 
 **Releases.** Every push to `main` triggers [.github/workflows/release.yml](.github/workflows/release.yml), which builds the controller and attaches a zip (`unicorner_controller.tox` + `unicorner_controller_dist/`) plus the bare `.tox` to a fresh GitHub Release. CI can't run TouchDesigner, so the committed `td/unicorner_controller.tox` is the source of truth: **after any change to the COMP's structure or its embedded Python (scaffold.py, the modules under `td/modules/`), open `td/main.toe`, re-run `poc/7-drop-in/scaffold.py` via MCP, and commit the regenerated `td/unicorner_controller.tox`** — otherwise the next release ships a stale COMP.
 
+**PR reviews.** Opening a PR triggers [.github/workflows/claude-review.yml](.github/workflows/claude-review.yml), which runs the official `code-review` plugin and posts severity-tagged inline comments. Fires on `opened` only — pushes to an open PR do not re-review.
+
 ## Troubleshooting
 
 ### `🔌 TouchDesigner Connection Failed` / `ECONNREFUSED 127.0.0.1:9981`
