@@ -80,6 +80,7 @@ Use shape (c) only when you genuinely cannot tell what the user wants from the s
    - `pulse` -> `"type": "button"`
    - Multi-param sweep -> `"type": "macro"` (one input drives 2+ params at once)
    Example: `{"id":"speed","label":"Speed","type":"knob","bind":{"path":"/…/lfo1/rate","min":0.1,"max":4.0}}`
+   **Exception — routing-only knobs.** A knob referenced by a routing's `rate_multiplier_control_id` or `blend_control_id` may omit `bind.path` entirely; the routing reads its raw value. Still provide `bind` with `min`/`max`/`default` so the knob has a sensible range — e.g. `{"id":"speed_mult","type":"knob","label":"Speed ×","bind":{"min":0.25,"max":4.0,"default":1.0}}` for a rate multiplier, or `{"min":0.0,"max":1.0,"default":1.0}` for a blend.
 6. **Use macros liberally.** Most user requests ("intensity", "depth", "energy") are inherently multi-param. Bind 2–4 params per macro when they sweep together to produce the named feel.
 7. **Use curves and clamps intentionally** — these are the difference between a usable knob and a magic-feeling one:
    - `curve: "exp"` for intensity / loudness / scale — low-end matters
@@ -157,7 +158,22 @@ Three routing types:
   "envelope_decay":  0.5,                 // seconds; how long each pulse pushes the integrator (default 0.5)
   "envelope_attack": 0.0,                 // seconds; usually 0 for snappy beat response
   "rate_multiplier_control_id": "<optional control id for a x0.25..x4 knob>",
-  "wrap":            true,                // % 1 the integrator so phase-like targets stay in [0..1] before remap
+  "wrap":            true,                // loop the Speed CHOP at [0,1] so phase-like targets stay bounded (default true; set false for unbounded counters)
+  "targets": [
+    { "path": "<scene op path>", "param": "<lowercase>", "min": 0.0, "max": 1.0, "curve": "linear" }
+  ]
+}
+```
+
+```
+{
+  "id":              "<snake_case>",
+  "type":            "beat_envelope",
+  "label":           "Beat -> Scale pulse",
+  "djay_channel":    "pulse",            // trigger channel — rises briefly on each beat/bar
+  "envelope_decay":  0.3,                 // seconds; how long the envelope decays after each pulse
+  "envelope_attack": 0.0,                 // seconds; usually 0 for snappy beat response
+  "blend_control_id": "<optional control id, 0-1 scales the pulse depth>",
   "targets": [
     { "path": "<scene op path>", "param": "<lowercase>", "min": 0.0, "max": 1.0, "curve": "linear" }
   ]
@@ -171,11 +187,13 @@ Routing hard rules:
 - `lfo_name` is a child name (no slashes). It will be created under the scene root, tagged for cleanup.
 - `target_lfo_path` for `bar_reset` should reference an LFO you also create via `lfo_sync` in the same spec (use its computed path: `<scene_root>/<lfo_name>`), or an LFO already in the scene catalog with type `lfo`.
 - `triggered_speed` should only use channels with `trigger` semantic (`pulse`, `kick`, `snare`) — using a counter or continuous channel would push the integrator unbounded.
+- `beat_envelope` should also only use `trigger`-semantic channels — the envelope spikes on each pulse.
 
 Routing heuristics:
 - `direct` for amplitude-like channels (`bass`, `mid`, `rms`, etc.) driving visible scalar params (brightness, emit, scale).
 - `lfo_sync` whenever the user wants *smooth oscillation* that should follow tempo. `beats_per_cycle: 1` = pulse per beat, `4` = per bar. Best for sine-like motion (size pulse, color sway).
-- `triggered_speed` whenever the user wants something to *advance per beat* — phase cycling a palette, a counter ticking up, anything where each beat causes a discrete forward step. Pair with a `rate_multiplier_control_id` knob so the DJ can speed up / slow down without re-prompting.
+- **`beat_envelope` is the default choice for "param X pulses on the beat"** — scale lurches in/out, opacity flashes, emit spikes, etc. Each trigger spikes the envelope to peak (`max`) and decays back to rest (`min`). Simple direct mapping with no integration. Pair with a `blend_control_id` slider so the DJ can dial the pulse depth.
+- `triggered_speed` only for things that need to *advance per beat* — phase cycling a palette, a counter ticking up, anything where each beat causes a discrete forward step that *accumulates*. If the param should just swing min↔max on each beat, use `beat_envelope` instead — simpler to reason about. Pair with a `rate_multiplier_control_id` knob.
 - `bar_reset` only when the user explicitly asks to "reset" / "restart" / "pulse on the bar" — adds a CHOP Execute DAT, which is heavier than an expression.
 - Pair a `direct` routing with a `blend_control_id` knob when the DJ might want to dial the music reactivity in or out. Pair an `lfo_sync` with a `rate_multiplier_control_id` knob when they might want to half-time / double-time.
 - Keep routings to ≤ 6. Each one is a thing the DJ has to mentally track.

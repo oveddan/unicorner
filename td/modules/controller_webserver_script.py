@@ -308,8 +308,8 @@ def _handle_generate(ws_dat, client, msg) -> None:
 
     def _worker():
         try:
-            response_text = gen._call_anthropic(
-                messages, model=gen.DEFAULT_MODEL, api_key=api_key
+            response_text = gen.call_anthropic_with_json_retry(
+                messages, model=gen.DEFAULT_MODEL, api_key=api_key,
             )
             _pending[scene_id] = {
                 'response':   response_text,

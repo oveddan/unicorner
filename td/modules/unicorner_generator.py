@@ -450,6 +450,7 @@ Use shape (c) only when you genuinely cannot tell what the user wants from the s
    - `pulse` -> `"type": "button"`
    - Multi-param sweep -> `"type": "macro"` (one input drives 2+ params at once)
    Example: `{"id":"speed","label":"Speed","type":"knob","bind":{"path":"/…/lfo1/rate","min":0.1,"max":4.0}}`
+   **Exception — routing-only knobs.** A knob referenced by a routing's `rate_multiplier_control_id` or `blend_control_id` may omit `bind.path` entirely; the routing reads its raw value. Still provide `bind` with `min`/`max`/`default` so the knob has a sensible range — e.g. `{"id":"speed_mult","type":"knob","label":"Speed ×","bind":{"min":0.25,"max":4.0,"default":1.0}}` for a rate multiplier, or `{"min":0.0,"max":1.0,"default":1.0}` for a blend.
 6. **Use macros liberally.** Most user requests ("intensity", "depth", "energy") are inherently multi-param. Bind 2–4 params per macro when they sweep together to produce the named feel.
 7. **Use curves and clamps intentionally** — these are the difference between a usable knob and a magic-feeling one:
    - `curve: "exp"` for intensity / loudness / scale — low-end matters
@@ -527,7 +528,22 @@ Three routing types:
   "envelope_decay":  0.5,                 // seconds; how long each pulse pushes the integrator (default 0.5)
   "envelope_attack": 0.0,                 // seconds; usually 0 for snappy beat response
   "rate_multiplier_control_id": "<optional control id for a x0.25..x4 knob>",
-  "wrap":            true,                // % 1 the integrator so phase-like targets stay in [0..1] before remap
+  "wrap":            true,                // loop the Speed CHOP at [0,1] so phase-like targets stay bounded (default true; set false for unbounded counters)
+  "targets": [
+    { "path": "<scene op path>", "param": "<lowercase>", "min": 0.0, "max": 1.0, "curve": "linear" }
+  ]
+}
+```
+
+```
+{
+  "id":              "<snake_case>",
+  "type":            "beat_envelope",
+  "label":           "Beat -> Scale pulse",
+  "djay_channel":    "pulse",            // trigger channel — rises briefly on each beat/bar
+  "envelope_decay":  0.3,                 // seconds; how long the envelope decays after each pulse
+  "envelope_attack": 0.0,                 // seconds; usually 0 for snappy beat response
+  "blend_control_id": "<optional control id, 0-1 scales the pulse depth>",
   "targets": [
     { "path": "<scene op path>", "param": "<lowercase>", "min": 0.0, "max": 1.0, "curve": "linear" }
   ]
@@ -541,11 +557,13 @@ Routing hard rules:
 - `lfo_name` is a child name (no slashes). It will be created under the scene root, tagged for cleanup.
 - `target_lfo_path` for `bar_reset` should reference an LFO you also create via `lfo_sync` in the same spec (use its computed path: `<scene_root>/<lfo_name>`), or an LFO already in the scene catalog with type `lfo`.
 - `triggered_speed` should only use channels with `trigger` semantic (`pulse`, `kick`, `snare`) — using a counter or continuous channel would push the integrator unbounded.
+- `beat_envelope` should also only use `trigger`-semantic channels — the envelope spikes on each pulse.
 
 Routing heuristics:
 - `direct` for amplitude-like channels (`bass`, `mid`, `rms`, etc.) driving visible scalar params (brightness, emit, scale).
 - `lfo_sync` whenever the user wants *smooth oscillation* that should follow tempo. `beats_per_cycle: 1` = pulse per beat, `4` = per bar. Best for sine-like motion (size pulse, color sway).
-- `triggered_speed` whenever the user wants something to *advance per beat* — phase cycling a palette, a counter ticking up, anything where each beat causes a discrete forward step. Pair with a `rate_multiplier_control_id` knob so the DJ can speed up / slow down without re-prompting.
+- **`beat_envelope` is the default choice for "param X pulses on the beat"** — scale lurches in/out, opacity flashes, emit spikes, etc. Each trigger spikes the envelope to peak (`max`) and decays back to rest (`min`). Simple direct mapping with no integration. Pair with a `blend_control_id` slider so the DJ can dial the pulse depth.
+- `triggered_speed` only for things that need to *advance per beat* — phase cycling a palette, a counter ticking up, anything where each beat causes a discrete forward step that *accumulates*. If the param should just swing min↔max on each beat, use `beat_envelope` instead — simpler to reason about. Pair with a `rate_multiplier_control_id` knob.
 - `bar_reset` only when the user explicitly asks to "reset" / "restart" / "pulse on the bar" — adds a CHOP Execute DAT, which is heavier than an expression.
 - Pair a `direct` routing with a `blend_control_id` knob when the DJ might want to dial the music reactivity in or out. Pair an `lfo_sync` with a `rate_multiplier_control_id` knob when they might want to half-time / double-time.
 - Keep routings to ≤ 6. Each one is a thing the DJ has to mentally track.
@@ -854,22 +872,54 @@ def _call_anthropic(messages: list, model: str, api_key: str = None) -> str:
     return ''.join(text_parts).strip()
 
 
-def _parse_spec(text: str, catalog: dict) -> dict:
+def _strip_fences(text: str) -> str:
     """The system prompt forbids markdown fences, but be defensive — strip them
     if the model slips up."""
     t = text.strip()
     if t.startswith('```'):
-        # drop the first fence line + a trailing fence
         lines = t.split('\n')
         if lines[0].startswith('```'):
             lines = lines[1:]
         if lines and lines[-1].startswith('```'):
             lines = lines[:-1]
         t = '\n'.join(lines).strip()
+    return t
+
+
+def _parse_spec(text: str, catalog: dict) -> dict:
+    t = _strip_fences(text)
     try:
         return json.loads(t)
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Generator output is not valid JSON: {e}\n----\n{text}") from e
+
+
+def call_anthropic_with_json_retry(messages: list, model: str, api_key: str,
+                                   max_retries: int = 1) -> str:
+    """Call the API; if the response isn't parseable JSON, retry up to
+    `max_retries` times with a corrective follow-up message that shows the
+    model its bad output and the parser error. Returns the last response
+    text — the caller still runs the real parse + validation downstream and
+    will get a clear error if even the retry produced unusable output.
+    """
+    response_text = _call_anthropic(messages, model=model, api_key=api_key)
+    for attempt in range(max_retries):
+        try:
+            json.loads(_strip_fences(response_text))
+            return response_text
+        except json.JSONDecodeError as e:
+            print(f"unicorner: JSON parse failed (attempt {attempt + 1}); retrying. err={e}")
+            retry_messages = list(messages) + [
+                {'role': 'assistant', 'content': response_text},
+                {'role': 'user', 'content': (
+                    f"That output was not valid JSON ({e}). "
+                    "Output the corrected response as a single valid JSON object — "
+                    "no prose, no markdown fences, no commentary. Check bracket "
+                    "and brace balance carefully."
+                )},
+            ]
+            response_text = _call_anthropic(retry_messages, model=model, api_key=api_key)
+    return response_text
 
 
 def _normalize_spec(spec: dict, catalog: dict) -> dict:
@@ -974,6 +1024,18 @@ def _validate_spec(spec: dict, catalog: dict, raw_response: str = '') -> None:
 
     catalog_paths = {p['path'] for m in catalog['modules'] for p in m['parameters']}
     VALID_TYPES = {'knob', 'slider', 'toggle', 'button', 'macro'}
+
+    # Controls referenced as routing multipliers/blends may omit `bind.path` —
+    # they exist purely as a surface knob whose value the routing expression reads.
+    routing_referenced_ids: set = set()
+    for r in (spec.get('routings') or []):
+        if not isinstance(r, dict):
+            continue
+        for k in ('blend_control_id', 'rate_multiplier_control_id'):
+            cid = r.get(k)
+            if isinstance(cid, str):
+                routing_referenced_ids.add(cid)
+
     for i, ctrl in enumerate(controls):
         if 'type' not in ctrl or ctrl['type'] not in VALID_TYPES:
             raise RuntimeError(
@@ -992,10 +1054,14 @@ def _validate_spec(spec: dict, catalog: dict, raw_response: str = '') -> None:
                     raise RuntimeError(f"Spec macro binds path {path!r} not in catalog")
         else:
             bind = ctrl.get('bind')
+            is_routing_only = ctrl.get('id') in routing_referenced_ids
             if not isinstance(bind, dict) or 'path' not in bind:
-                raise RuntimeError(
-                    f"Control[{i}] ({ctrl['type']} {ctrl.get('id')!r}) missing `bind.path`" + _diag()
-                )
+                if not is_routing_only:
+                    raise RuntimeError(
+                        f"Control[{i}] ({ctrl['type']} {ctrl.get('id')!r}) missing `bind.path`" + _diag()
+                    )
+                # Routing-only control — bind.path optional. Done.
+                continue
             if bind['path'] not in catalog_paths:
                 raise RuntimeError(f"Spec binds path {bind['path']!r} not in catalog")
 
@@ -1081,6 +1147,18 @@ def _sanitize_routings(spec: dict, catalog: dict, dj_catalog) -> None:
                 mult = r.get('rate_multiplier_control_id')
                 if mult and mult not in control_ids:
                     raise ValueError(f"rate_multiplier_control_id {mult!r} not in spec.controls")
+            elif rtype == 'beat_envelope':
+                if r.get('djay_channel') not in channel_names:
+                    raise ValueError(f"djay_channel {r.get('djay_channel')!r} not in dj_catalog")
+                targets = r.get('targets')
+                if not isinstance(targets, list) or not targets:
+                    raise ValueError("beat_envelope has no targets")
+                for t in targets:
+                    if not isinstance(t, dict) or t.get('path') not in module_paths:
+                        raise ValueError(f"beat_envelope target path {t.get('path') if isinstance(t, dict) else t!r} not in scene catalog")
+                blend = r.get('blend_control_id')
+                if blend and blend not in control_ids:
+                    raise ValueError(f"blend_control_id {blend!r} not in spec.controls")
             else:
                 raise ValueError(f"unknown routing type {rtype!r}")
         except ValueError as e:
@@ -1203,31 +1281,37 @@ def _apply_control(ctrl: dict, page, surface, surface_path: str, EXPRESSION):
     name  = _id_to_par_name(cid)
 
     if ctype in ('knob', 'slider'):
-        bind = ctrl['bind']
+        bind = ctrl.get('bind') or {}
         lo = bind.get('min', 0.0)
         hi = bind.get('max', 1.0)
+        default = bind.get('default', lo)
         p = page.appendFloat(name, label=label)[0]
-        p.default  = lo
+        p.default  = default
         p.min  = lo; p.max  = hi
         p.normMin = lo; p.normMax = hi
         p.clampMin = True; p.clampMax = True
-        p.val = lo
-        _bind_target(bind['path'], EXPRESSION,
-                     expr=_direct_expression(surface_path, name, bind, lo, hi))
+        p.val = default
+        if 'path' in bind:
+            _bind_target(bind['path'], EXPRESSION,
+                         expr=_direct_expression(surface_path, name, bind, lo, hi))
+        # else: routing-only knob — surface par exists; a routing expression
+        # reads its value directly via op('<surface>').par.<name>.
 
     elif ctype == 'toggle':
-        bind = ctrl['bind']
+        bind = ctrl.get('bind') or {}
         p = page.appendToggle(name, label=label)[0]
         p.default = False
         p.val = False
-        _bind_target(bind['path'], EXPRESSION,
-                     expr=f"op('{surface_path}').par.{name}")
+        if 'path' in bind:
+            _bind_target(bind['path'], EXPRESSION,
+                         expr=f"op('{surface_path}').par.{name}")
 
     elif ctype == 'button':
-        bind = ctrl['bind']
+        bind = ctrl.get('bind') or {}
         p = page.appendPulse(name, label=label)[0]
         _ = p  # iPad renders the button; pulse-through is a v2 (Scope B) task
-        _bind_target_noop(bind['path'])
+        if 'path' in bind:
+            _bind_target_noop(bind['path'])
 
     elif ctype == 'macro':
         p = page.appendFloat(name, label=label)[0]
@@ -1349,6 +1433,18 @@ def _apply_routings(routings, scene_parent: str, dj_chop_path: str,
                 _bump()
             except Exception as e:
                 debug(f"unicorner: triggered_speed routing {r.get('id')!r} failed: {e}")  # noqa: F821
+
+    for r in routings:
+        if r.get('type') == 'beat_envelope':
+            try:
+                _apply_beat_envelope_routing(
+                    r, parent, dj_chop_path, surface_path,
+                    control_id_to_par, EXPRESSION, new_targets,
+                    nx=lfo_node_x, ny=lfo_node_y + 500,
+                )
+                _bump()
+            except Exception as e:
+                debug(f"unicorner: beat_envelope routing {r.get('id')!r} failed: {e}")  # noqa: F821
 
     # 4. Remember target params for the next teardown.
     _last_routing_targets_by_scene[scene_id] = new_targets
@@ -1599,6 +1695,17 @@ def _apply_triggered_speed_routing(r: dict, parent, dj_chop_path: str,
     spd.nodeX = nx + 300; spd.nodeY = ny
     spd.inputConnectors[0].connect(env)
 
+    if wrap:
+        # Loop the integrator at [0,1] so the CHOP value itself stays bounded —
+        # matches the `% 1.0` in the per-target expression below. Speed CHOP
+        # exposes the limit range as `min`/`max` (not `limitmin`/`limitmax`).
+        for attr, val in (('limittype', 'loop'), ('min', 0.0), ('max', 1.0)):
+            if hasattr(spd.par, attr):
+                try:
+                    setattr(spd.par, attr, val)
+                except Exception:
+                    pass
+
     # 4. Bind each target via expression.
     spd_path = spd.path
     rate_mult_expr = (f"op('{surface_path}').par.{mult_par}"
@@ -1618,6 +1725,90 @@ def _apply_triggered_speed_routing(r: dict, parent, dj_chop_path: str,
         if wrap:
             base = f"(({base}) % 1.0)"
         expr = f"({base}) * ({tmax - tmin}) + ({tmin})"
+        par.expr = expr
+        par.mode = EXPRESSION
+        new_targets.append((t['path'], t['param']))
+
+
+def _apply_beat_envelope_routing(r: dict, parent, dj_chop_path: str,
+                                 surface_path: str, control_id_to_par: dict,
+                                 EXPRESSION, new_targets: list,
+                                 nx: int, ny: int) -> None:
+    """Scaffolds a per-beat envelope (no integrator) — simpler than
+    triggered_speed for "param pulses min<->max on each beat" cases.
+
+        djay_chop -> Select(channel) -> Envelope(attack, decay, exp)
+                  -> expression on each target par
+
+    The envelope spikes to ~1 on each trigger and decays back to 0. Target
+    param sweeps from `min` (rest) to `max` (peak) directly — no phase
+    integration, so the mapping is immediate and intuitive.
+    """
+    rid     = r.get('id') or 'unnamed'
+    channel = r['djay_channel']
+    decay   = float(r.get('envelope_decay', 0.5))
+    attack  = float(r.get('envelope_attack', 0.0))
+    blend_cid = r.get('blend_control_id')
+    blend_par = control_id_to_par.get(blend_cid) if blend_cid else None
+
+    sel_name = _safe_node_name(f"ai_sel_{rid}")
+    env_name = _safe_node_name(f"ai_env_{rid}")
+
+    for nm in (sel_name, env_name):
+        existing = parent.op(nm)
+        if existing is None:
+            continue
+        if ROUTING_TAG not in (existing.tags or set()):
+            debug(f"unicorner: beat_envelope wants to create {nm!r} but a "  # noqa: F821
+                  f"non-routing op already exists; skipping routing {rid!r}")
+            return
+        existing.destroy()
+
+    sel = parent.create('selectCHOP', sel_name)
+    sel.tags.add(ROUTING_TAG)
+    sel.nodeX = nx; sel.nodeY = ny
+    try:
+        sel.par.chop = dj_chop_path
+    except Exception as e:
+        debug(f"unicorner: beat_envelope Select.chop set failed: {e}")  # noqa: F821
+    for attr in ('channames', 'channelnames', 'chanames'):
+        if hasattr(sel.par, attr):
+            try:
+                setattr(sel.par, attr, channel)
+                break
+            except Exception:
+                pass
+
+    env = parent.create('envelopeCHOP', env_name)
+    env.tags.add(ROUTING_TAG)
+    env.nodeX = nx + 150; env.nodeY = ny
+    env.inputConnectors[0].connect(sel)
+    for attr, val in (('attack', attack), ('decay', decay), ('release', decay),
+                      ('method', 'exp'), ('Method', 'exp')):
+        if hasattr(env.par, attr):
+            try:
+                setattr(env.par, attr, val)
+            except Exception:
+                pass
+
+    env_path = env.path
+    for t in r.get('targets', []):
+        tnode = op(t['path'])  # noqa: F821
+        if tnode is None:
+            debug(f"unicorner: beat_envelope target node not found: {t['path']}")  # noqa: F821
+            continue
+        par = getattr(tnode.par, t['param'], None)
+        if par is None:
+            debug(f"unicorner: beat_envelope target par not found: {t['path']}.{t['param']}")  # noqa: F821
+            continue
+        tmin = float(t.get('min', 0.0))
+        tmax = float(t.get('max', 1.0))
+        curve = t.get('curve', 'linear')
+        norm = f"op('{env_path}')[0]"
+        if blend_par:
+            norm = f"({norm}) * op('{surface_path}').par.{blend_par}"
+        shaped = _shape_norm(norm, curve)
+        expr = f"({shaped}) * ({tmax - tmin}) + ({tmin})"
         par.expr = expr
         par.mode = EXPRESSION
         new_targets.append((t['path'], t['param']))
