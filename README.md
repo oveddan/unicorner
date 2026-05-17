@@ -53,6 +53,28 @@ Layer C — AI-generated controller
 | Eugene | QA, integration testing, music selection |
 | Alex | DJ for the live demo |
 
+## Running the controller locally
+
+There are two workflows depending on what you're testing.
+
+**Hot-reload — for UI work (no TouchDesigner needed)**
+
+```bash
+cd controller && npm run dev
+```
+
+Opens at `http://localhost:5173`. Use this URL in your browser or on an iPad on the same network. WebSocket messages won't reach TD unless TD is also running, but the UI renders fine for layout and styling work.
+
+**TD-served — to test the full WebSocket flow**
+
+```bash
+./scripts/sync-dist.sh
+```
+
+This builds the React app and syncs the output to `td/unicorner_controller_dist/`, which is where the COMP looks by default. Then in TouchDesigner, pulse the `Refreshurl` parameter on the `unicorner_controller` COMP to reload. Open `http://localhost:9980` — you should see the controller UI, not the "web server is up" message.
+
+> If the COMP's `Distpath` parameter was set to a custom path, it must point to a folder that contains `index.html`. The default `./unicorner_controller_dist` (relative to the `.toe`) is what `sync-dist.sh` targets.
+
 ## More
 
 Full plan (architecture, schemas, milestones, risks) in [`PLAN.md`](./PLAN.md).
