@@ -816,7 +816,7 @@ def _http_error(response, code: int, reason: str, body: str = '') -> dict:
     response['statusCode'] = code
     response['statusReason'] = reason
     response['data'] = body or (reason + '\n')
-    response['headers'] = {'Content-Type': 'text/plain; charset=utf-8'}
+    response['Content-Type'] = 'text/plain; charset=utf-8'
     return response
 
 
@@ -870,7 +870,8 @@ def _serve_static(request, response, dist_root: str) -> dict:
     response['statusCode'] = 200
     response['statusReason'] = 'OK'
     response['data'] = data
-    response['headers'] = {'Content-Type': mime, 'Cache-Control': cache}
+    response['Content-Type'] = mime
+    response['Cache-Control'] = cache
     return response
 
 
@@ -889,7 +890,7 @@ def onHTTPRequest(webServerDAT, request, response):
             "    built controller (Vite dist/, must contain index.html), or\n"
             "  - run `npm run dev` in controller/ and use the Uiport URL.\n"
         )
-        response['headers'] = {'Content-Type': 'text/plain; charset=utf-8'}
+        response['Content-Type'] = 'text/plain; charset=utf-8'
         return response
     return _serve_static(request, response, dist_root)
 
