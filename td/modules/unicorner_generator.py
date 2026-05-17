@@ -291,11 +291,12 @@ Use shape (c) only when you genuinely cannot tell what the user wants from the s
 2. **Every `path` in your spec must appear verbatim in the catalog you were given.** Never invent paths or rename params.
 3. **`scene_id` in your output equals `scene_id` in the catalog.**
 4. **Maximum 12 controls.** Fewer is better. The DJ has two hands.
-5. **Match widget to param type:**
-   - `float` -> `knob` or `slider`
-   - `bool` -> `toggle`
-   - `pulse` -> `button`
-   - Multi-param sweep -> `macro` (one input drives 2+ params at once)
+5. **Set `"type"` on every control** — the JSON key is literally `"type"`, not `"widget"`:
+   - `float` -> `"type": "knob"` or `"type": "slider"`
+   - `bool` -> `"type": "toggle"`
+   - `pulse` -> `"type": "button"`
+   - Multi-param sweep -> `"type": "macro"` (one input drives 2+ params at once)
+   Example: `{"id":"speed","label":"Speed","type":"knob","bind":{"path":"/…/lfo1/rate","min":0.1,"max":4.0}}`
 6. **Use macros liberally.** Most user requests ("intensity", "depth", "energy") are inherently multi-param. Bind 2–4 params per macro when they sweep together to produce the named feel.
 7. **Use curves and clamps intentionally** — these are the difference between a usable knob and a magic-feeling one:
    - `curve: "exp"` for intensity / loudness / scale — low-end matters
@@ -356,10 +357,12 @@ def build_messages(catalog: dict,
         "",
         "If the request is unambiguous (single answer makes sense):",
         '  {"schema_version":"0.1","scene_id":"' + catalog['scene_id'] + '",'
-        '"rationale":"…","controls":[…],"layout":[…]}',
+        '"rationale":"…","controls":[{"id":"…","label":"…","type":"knob","bind":{"path":"…","min":0,"max":1}},…],"layout":[…]}',
         "",
         "If the request admits multiple good interpretations (2–3 meaningfully different options):",
-        '  {"alternatives":[{"id":"a","label":"<short>","description":"<one line>","spec":{schema_version,scene_id,rationale,controls,layout}}, ...]}',
+        '  {"alternatives":[{"id":"a","label":"<short>","description":"<one line>","spec":{"schema_version":"0.1","scene_id":"' + catalog['scene_id'] + '","rationale":"…","controls":[{"id":"…","label":"…","type":"knob","bind":{"path":"…","min":0,"max":1}}],"layout":[]}}, ...]}',
+        "",
+        'Every control MUST have "type" (not "widget"). Valid values: "knob", "slider", "toggle", "button", "macro".',
     ]
     user_turn = "\n".join(user_turn_lines)
 
@@ -629,6 +632,14 @@ def _normalize_spec(spec: dict, catalog: dict) -> dict:
         # rest of the normalizer / apply path can rely on `type`.
         if 'type' not in ctrl and 'widget' in ctrl:
             ctrl['type'] = ctrl.pop('widget')
+        if 'type' not in ctrl:
+            bind = ctrl.get('bind') or {}
+            ptype = ctrl.get('param_type') or bind.get('param_type') or ''
+            if ptype == 'bool':
+                ctrl['type'] = 'toggle'
+            elif ptype == 'pulse':
+                ctrl['type'] = 'button'
+            # float/int left absent → _validate_spec raises a clear RuntimeError
         ctype = ctrl.get('type')
 
         if ctype == 'macro':
@@ -749,7 +760,15 @@ def apply_spec(spec: dict, scene_parent: str) -> str:
 
     EXPRESSION = _par_mode_enum(parent).EXPRESSION
 
-    for ctrl in spec['controls']:
+    VALID_APPLY_TYPES = {'knob', 'slider', 'toggle', 'button', 'macro'}
+    for i, ctrl in enumerate(spec['controls']):
+        ctype = ctrl.get('type')
+        if not ctype or ctype not in VALID_APPLY_TYPES:
+            raise RuntimeError(
+                f"Control[{i}] id={ctrl.get('id')!r} has missing/invalid "
+                f"`type` {ctype!r} — expected one of {sorted(VALID_APPLY_TYPES)}. "
+                f"Re-generate the controller."
+            )
         _apply_control(ctrl, page, surface, surface_path, EXPRESSION)
 
     return surface_path
