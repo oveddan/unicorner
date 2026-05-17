@@ -174,6 +174,14 @@ export default function App() {
       case 'scene_summary':
         console.log('[app] scene_summary', msg.scene, msg.summary?.length, 'chars')
         setSummaryStatus('idle')
+        // Empty summary text = a reset cleared it server-side. Wipe local
+        // cache too so the next scan starts fresh and the drawer doesn't
+        // resurrect a stale read.
+        if (!msg.summary) {
+          setSceneSummary(null)
+          saveSummary(msg.scene, null)
+          break
+        }
         setSceneSummary((prev) => {
           // Don't overwrite a user-edited summary without confirmation —
           // show the new text alongside the edit by replacing only when
@@ -193,6 +201,23 @@ export default function App() {
           saveSummary(msg.scene, next)
           return next
         })
+        break
+      case 'scene_reset':
+        // Server confirmed a full scene reset — flush everything client-side
+        // so all open tabs / devices stay in lockstep (the controller_surface
+        // gets torn down server-side; the empty-schema broadcast that
+        // followed will clear `params`).
+        console.log('[app] scene_reset', msg.scene)
+        setLastSpec(null)
+        setAlternatives(null)
+        setSceneSummary(null)
+        saveSummary(msg.scene, null)
+        setGenStatus('idle')
+        setErrorMsg(null)
+        try {
+          localStorage.removeItem(`unicorner.chat.${msg.scene || 'default'}`)
+          localStorage.removeItem(`unicorner.chat.draft.${msg.scene || 'default'}`)
+        } catch { /* localStorage disabled — degrade silently */ }
         break
     }
   }, [])

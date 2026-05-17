@@ -107,12 +107,18 @@ def _comp():
 
 
 def _config() -> dict:
-    """Read Target + Scene from the COMP's custom params."""
+    """Read Target + Scene + Djaypath from the COMP's custom params."""
     comp = _comp()
     if comp is None:
-        return {'target': '/project1', 'scene': '', 'scene_id': 'default'}
+        return {'target': '/project1', 'scene': '', 'scene_id': 'default', 'djay_path': ''}
     target = comp.par.Target.eval() if hasattr(comp.par, 'Target') else '/project1'
     scene  = comp.par.Scene.eval()  if hasattr(comp.par, 'Scene')  else ''
+    djay_path = ''
+    if hasattr(comp.par, 'Djaypath'):
+        try:
+            djay_path = (comp.par.Djaypath.eval() or '').strip()
+        except Exception:
+            djay_path = ''
     scene_root  = scene or target
     scene_id    = (scene.rsplit('/', 1)[-1] if scene else (target.rsplit('/', 1)[-1] or 'scene'))
     scene_parent = scene or target  # surface lives directly under the scene root
@@ -123,6 +129,7 @@ def _config() -> dict:
         'scene_root':   scene_root,
         'scene_parent': scene_parent,
         'scene_id':     scene_id,
+        'djay_path':    djay_path,
     }
 
 
@@ -245,14 +252,16 @@ def _handle_generate(ws_dat, client, msg) -> None:
     # Phase 1: main-thread prep (catalog walk + API key + messages).
     scene_summary = msg.get('scene_summary') if isinstance(msg.get('scene_summary'), str) else None
     try:
-        catalog  = gen.extract_catalog(cfg['scene_root'], cfg['scene_id'])
-        api_key  = gen.resolve_api_key(cfg.get('comp'))
-        messages = gen.build_messages(
+        catalog    = gen.extract_catalog(cfg['scene_root'], cfg['scene_id'])
+        dj_catalog = gen.extract_djay_catalog(cfg.get('djay_path') or '')
+        api_key    = gen.resolve_api_key(cfg.get('comp'))
+        messages   = gen.build_messages(
             catalog,
             user_prompt,
             history=msg.get('history') or [],
             current_spec=_last_spec_by_scene.get(cfg['scene_id']),
             scene_summary=scene_summary,
+            dj_catalog=dj_catalog,
         )
     except Exception as e:
         traceback.print_exc()
@@ -289,6 +298,7 @@ def _handle_generate(ws_dat, client, msg) -> None:
             _pending[scene_id] = {
                 'response':   response_text,
                 'catalog':    catalog,
+                'dj_catalog': dj_catalog,
                 'prompt':     user_prompt,
                 'started_at': started_at,
                 'error':      None,
@@ -298,6 +308,7 @@ def _handle_generate(ws_dat, client, msg) -> None:
             _pending[scene_id] = {
                 'response':   None,
                 'catalog':    catalog,
+                'dj_catalog': dj_catalog,
                 'prompt':     user_prompt,
                 'started_at': started_at,
                 'error':      str(e),
@@ -351,7 +362,9 @@ def _apply_pending(scene_id: str) -> None:
         return
 
     try:
-        parsed = gen.parse_response(entry['response'], entry['catalog'])
+        parsed = gen.parse_response(
+            entry['response'], entry['catalog'], dj_catalog=entry.get('dj_catalog'),
+        )
     except Exception as e:
         traceback.print_exc()
         gen.log_event(scene_id, {**log_base, 'outcome': 'validation_error', 'error': str(e)})
@@ -428,8 +441,17 @@ def _apply_and_broadcast(spec: dict, cfg: dict, ws) -> None:
     gen = _generator()
     if gen is None:
         return
+    # Resolve the DJay CHOP path so apply_spec can wire any routings in the
+    # spec. Cheap walk — re-cataloging is fine here (we're on the main thread
+    # and apply_spec needs the chop_path either way).
+    dj_chop_path = None
+    djay_path = cfg.get('djay_path') or ''
+    if djay_path:
+        dj_catalog = gen.extract_djay_catalog(djay_path)
+        if dj_catalog is not None:
+            dj_chop_path = dj_catalog.get('chop_path')
     try:
-        gen.apply_spec(spec, cfg['scene_parent'])
+        gen.apply_spec(spec, cfg['scene_parent'], dj_chop_path=dj_chop_path)
     except Exception as e:
         traceback.print_exc()
         if ws is not None:
@@ -586,6 +608,71 @@ def _handle_scene_change(ws_dat) -> None:
     _broadcast(ws_dat, payload)
 
 
+def _handle_reset_scene(ws_dat, client, msg) -> None:
+    """Full reset for the active scene: destroy the controller_surface and
+    any unicorner.routing-tagged ops under the scene parent, clear all
+    server-side caches (last spec, pending alternatives/questions/summary,
+    routing target params), then broadcast an empty schema + a cleared
+    scene_summary so all clients reset in lockstep.
+
+    The iPad-side companion clears localStorage (chat log, draft, summary)
+    so the next prompt starts from a clean slate.
+    """
+    cfg = _config()
+    scene_id = cfg['scene_id']
+    gen = _generator()
+
+    # Tear down the controller surface (and clear any expressions on
+    # downstream pars that referenced it).
+    parent = op(cfg['scene_parent'])  # noqa: F821
+    if parent is not None and gen is not None:
+        surface = parent.op(gen.SURFACE_NAME)
+        if surface is not None:
+            try:
+                # Reuse the existing teardown to clear dangling expressions.
+                gen._teardown_surface(parent, _surface_path(cfg), {})
+            except Exception:
+                traceback.print_exc()
+
+        # Also destroy routing-tagged ops (LFO CHOPs, CHOP Execute DATs)
+        # and clear expressions on params tracked from prior routings.
+        try:
+            gen._apply_routings(
+                routings=[],
+                scene_parent=cfg['scene_parent'],
+                dj_chop_path=None,
+                surface_path=_surface_path(cfg),
+                control_id_to_par={},
+                scene_id=scene_id,
+                EXPRESSION=gen._par_mode_enum(parent).EXPRESSION,
+            )
+        except Exception:
+            traceback.print_exc()
+
+    # Clear every per-scene cache. Use .pop with default so missing keys
+    # don't blow up.
+    _last_spec_by_scene.pop(scene_id, None)
+    _pending.pop(scene_id, None)
+    _pending_alternatives.pop(scene_id, None)
+    _pending_questions.pop(scene_id, None)
+    _pending_summary.pop(scene_id, None)
+    _generate_context_by_scene.pop(scene_id, None)
+    if gen is not None and hasattr(gen, '_last_routing_targets_by_scene'):
+        gen._last_routing_targets_by_scene.pop(scene_id, None)
+
+    if gen is not None:
+        try:
+            gen.log_event(scene_id, {'outcome': 'reset_scene'})
+        except Exception:
+            pass
+
+    # Broadcast the reset so all clients (and any extra browser tabs) flush
+    # their local state and the surface goes back to the "empty" view.
+    _broadcast(ws_dat, _build_schema_message(cfg))
+    _broadcast(ws_dat, {'type': 'scene_summary', 'scene': scene_id, 'summary': ''})
+    _broadcast(ws_dat, {'type': 'scene_reset',   'scene': scene_id})
+
+
 # ---------------------------------------------------------------------------
 # Web Server DAT callbacks
 # ---------------------------------------------------------------------------
@@ -626,6 +713,8 @@ def onWebSocketReceiveText(webServerDAT, client, data):
         _handle_pick_alternative(webServerDAT, client, msg)
     elif t == 'understand_scene':
         _handle_understand_scene(webServerDAT, client, msg)
+    elif t == 'reset_scene':
+        _handle_reset_scene(webServerDAT, client, msg)
     else:
         debug(f"controller_ws: ignoring msg type={t!r}")  # noqa: F821
 

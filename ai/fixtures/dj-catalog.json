@@ -1,0 +1,13 @@
+{
+  "path":      "/project1/djayPro",
+  "chop_path": "/project1/djayPro/out1",
+  "channels": [
+    {"name": "bpm",   "value": 124.0, "semantic": "bpm"},
+    {"name": "beat",  "value": 0.0,   "semantic": "trigger"},
+    {"name": "bar",   "value": 0.0,   "semantic": "trigger"},
+    {"name": "bass",  "value": 0.42,  "semantic": "amplitude"},
+    {"name": "mid",   "value": 0.18,  "semantic": "amplitude"},
+    {"name": "vocal", "value": 0.07,  "semantic": "amplitude"},
+    {"name": "drums", "value": 0.55,  "semantic": "amplitude"}
+  ]
+}
