@@ -4,10 +4,7 @@
 
 A hackathon prototype from the [Music Hackspace Lisbon hackathon](https://musichackspace.org/events/hackathon-lisbon-spring-2026) (16–17 May 2026, Algoriddim track).
 
-> "If you DJ at a club with a screen, you have nothing to put on it. This makes it easy."
-> — Richie Hawtin, after the demo
-
-Most "AI generates a UI" work treats the UI as the output. Unicorner treats the UI as the side effect. The interesting work is **reading the scene** — walking the parameter catalog of a TouchDesigner project, inferring what each control does musically and visually, and surfacing a small, opinionated, playable subset for the iPad. Optional routings wire [djay Pro](https://www.algoriddim.com/) signals (BPM-locked LFOs, beat envelopes, bass-driven modulation) directly into the scene.
+A DJ walks into a club with a screen and has nothing to put on it. That's the problem. Most "AI generates a UI" work treats the UI as the output; Unicorner treats the UI as the side effect. The interesting work is **reading the scene** — walking the parameter catalog of a TouchDesigner project, inferring what each control does musically and visually, and surfacing a small, opinionated, playable subset for the iPad. Optional routings wire [djay Pro](https://www.algoriddim.com/) signals (BPM-locked LFOs, beat envelopes, bass-driven modulation) directly into the scene.
 
 ## What it does
 
