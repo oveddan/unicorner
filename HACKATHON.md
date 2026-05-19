@@ -109,7 +109,6 @@ The hackathon proved the loop works. Real scenes, real signals, real iPad, real 
 | Bernardo | Visual identity (with Calin) + controller UX (with Dan) |
 | Guille | Audio signal extraction (Layer A augmentation) |
 | Eugene | QA, integration testing, music selection |
-| Alex | DJ for the live demo |
 
 ---
 
@@ -121,7 +120,7 @@ The hackathon proved the loop works. Real scenes, real signals, real iPad, real 
 
 Most "AI-generated UI" work treats the UI as the output. Unicorner treats the UI as the *side effect*. The interesting work is reading the scene: walking a stranger's TouchDesigner project, inferring from parameter names + types + ranges what each control does musically and visually, and surfacing a small, opinionated, playable subset. The iPad rendering is mechanical; the model's read of the scene is the artifact.
 
-Built over a weekend at the Music Hackspace Lisbon hackathon (Algoriddim track, May 2026) with [Calin, Bernardo, Guille, Eugene, and Alex]. Drop-in TouchDesigner COMP, in-process Anthropic calls from TD's bundled Python, React + WebSocket iPad controller, optional djay Pro signal routings (BPM-locked LFOs, beat envelopes, bass-driven modulation). Richie Hawtin liked the venue use case: a DJ walks into a club with a screen and now has something to play on it.
+Built over a weekend at the Music Hackspace Lisbon hackathon (Algoriddim track, May 2026) with Calin, Bernardo, Guille, and Eugene. Drop-in TouchDesigner COMP, in-process Anthropic calls from TD's bundled Python, React + WebSocket iPad controller, optional djay Pro signal routings (BPM-locked LFOs, beat envelopes, bass-driven modulation). Richie Hawtin liked the venue use case: a DJ walks into a club with a screen and now has something to play on it.
 
 Next: get much sharper at reading TouchDesigner scenes (this is the limit on real scenes, not the UI generation), teach the model the wiring idioms DJ visual artists already use, and extend the signal source from djay Pro to Beat Link Trigger so this works in any CDJ booth.
 
@@ -149,6 +148,6 @@ Next: get much sharper at reading TouchDesigner scenes (this is the limit on rea
 
 3/ Drop the .tox onto any TD project, paste an API key, open the iPad. Scan the scene, chat a prompt, controls appear — knobs, toggles, macros, plus optional routings that wire djay Pro signals (bass, beat, BPM) straight into the scene.
 
-4/ Built at @musichackspace Lisbon (Algoriddim track) with [Calin, Bernardo, Guille, Eugene, Alex]. Richie Hawtin: "If you DJ at a club with a screen, you have nothing to put on it. This makes it easy."
+4/ Built at @musichackspace Lisbon (Algoriddim track) with Calin, Bernardo, Guille, and Eugene. Richie Hawtin: "If you DJ at a club with a screen, you have nothing to put on it. This makes it easy."
 
 5/ Code + writeup: github.com/oveddan/unicorner. Next: sharper scene reading on real TD projects, a library of known-good DJ↔visual wiring idioms, and Beat Link Trigger support so this works in any CDJ booth — not just djay Pro.

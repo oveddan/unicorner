@@ -79,4 +79,3 @@ Hackathon prototype, not actively maintained.
 | Bernardo | Visual identity (with Calin) + controller UX (with Dan) |
 | Guille | Audio signal extraction (Layer A augmentation) |
 | Eugene | QA, integration testing, music selection |
-| Alex | DJ for the live demo |
