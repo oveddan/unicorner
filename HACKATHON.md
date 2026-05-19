@@ -125,29 +125,3 @@ Built over a weekend at the Music Hackspace Lisbon hackathon (Algoriddim track, 
 Next: get much sharper at reading TouchDesigner scenes (this is the limit on real scenes, not the UI generation), teach the model the wiring idioms DJ visual artists already use, and extend the signal source from djay Pro to Beat Link Trigger so this works in any CDJ booth.
 
 [Code](https://github.com/oveddan/unicorner) · [Writeup](HACKATHON.md)
-
----
-
-## Appendix — X post draft
-
-**Single-image / GIF version:**
-
-> "If you DJ at a club with a screen, you have nothing to put on it. This makes it easy." — Richie Hawtin
->
-> Built Unicorner at @musichackspace Lisbon: AI reads a TouchDesigner scene and generates a playable iPad controller from it in seconds. Drop-in .tox, no install.
->
-> [GIF: scan scene → chat prompt → controls appear → DJ plays]
->
-> github.com/oveddan/unicorner
-
-**Thread version (5 tweets):**
-
-1/ DJs walk into venues with screens and have nothing to play on them. So we built Unicorner: AI that reads a TouchDesigner scene and generates a playable iPad controller from whatever's in it.
-
-2/ The interesting part isn't the controller. UI generation is mechanical once you have a spec. The interesting part is the AI *reading the scene* — inferring from parameter names, types, and ranges what each control does musically and visually.
-
-3/ Drop the .tox onto any TD project, paste an API key, open the iPad. Scan the scene, chat a prompt, controls appear — knobs, toggles, macros, plus optional routings that wire djay Pro signals (bass, beat, BPM) straight into the scene.
-
-4/ Built at @musichackspace Lisbon (Algoriddim track) with Calin, Bernardo, Guille, and Eugene. Richie Hawtin: "If you DJ at a club with a screen, you have nothing to put on it. This makes it easy."
-
-5/ Code + writeup: github.com/oveddan/unicorner. Next: sharper scene reading on real TD projects, a library of known-good DJ↔visual wiring idioms, and Beat Link Trigger support so this works in any CDJ booth — not just djay Pro.
