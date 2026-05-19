@@ -1,8 +1,8 @@
 # Unicorner — hackathon writeup
 
-> After the demo, Richie Hawtin was clear about the problem this solves: a DJ walks into a club with a screen and has nothing to put on it.
-
 Built at the [Music Hackspace Lisbon hackathon](https://musichackspace.org/events/hackathon-lisbon-spring-2026), 16–17 May 2026, Algoriddim track.
+
+A DJ walks into a club with a screen and has nothing to put on it. That's the problem.
 
 The one-line pitch: **AI reads an arbitrary TouchDesigner scene and generates a playable control surface from whatever's in it** — knobs, toggles, macros, plus optional modulation routings driven by [djay Pro](https://www.algoriddim.com/) signals (bass → emit, BPM-locked LFOs, beat envelopes).
 
@@ -62,11 +62,11 @@ That post-event token-limit experience is what drove [the catalog-depth selector
 
 That's fair. They kind of were. The first demo was about *AI creativity* — read a scene, dream up controls for it. The second was about *playing a finished scene with a real controller* — sliders, MIDI, beat-locked modulation. Both were Unicorner, but we didn't frame them together. The pivot from "control screen for a scene" to "AI that reads any scene" hadn't propagated to the demo script.
 
-**Richie Hawtin:**
-1. Zeroed in on the problem Unicorner solves: a DJ walks into a venue with a screen and has nothing prepared to put on it. He didn't pitch the solution back as easy — he was clear about the *problem*, which is the more useful thing for us.
-2. Was specifically interested in the AI side — the part where it reads the scene and generates the surface. Not just the rendering layer.
+**Richie Hawtin** (paraphrasing from our conversation, not a direct quote):
+1. He spent his time on the problem, not the solution — a DJ walks into a venue with a screen and has nothing prepared to put on it. The framing is his; any gloss about the solution being "easy" was mine, and shouldn't be attributed to him.
+2. He was specifically interested in the AI side — the part where it reads the scene and generates the surface, not the rendering layer.
 
-The Richie framing is the pitch. The judge feedback is the lesson — next time, one demo, one story, even if the underlying system does two things.
+That problem framing is the pitch. The judge feedback is the lesson — next time, one demo, one story, even if the underlying system does two things.
 
 ## What we learned the hard way
 
@@ -120,7 +120,7 @@ The hackathon proved the loop works. Real scenes, real signals, real iPad, real 
 
 Most "AI-generated UI" work treats the UI as the output. Unicorner treats the UI as the *side effect*. The interesting work is reading the scene: walking a stranger's TouchDesigner project, inferring from parameter names + types + ranges what each control does musically and visually, and surfacing a small, opinionated, playable subset. The iPad rendering is mechanical; the model's read of the scene is the artifact.
 
-Built over a weekend at the Music Hackspace Lisbon hackathon (Algoriddim track, May 2026) with Calin, Bernardo, Guille, and Eugene. Drop-in TouchDesigner COMP, in-process Anthropic calls from TD's bundled Python, React + WebSocket iPad controller, optional djay Pro signal routings (BPM-locked LFOs, beat envelopes, bass-driven modulation). Richie Hawtin, after the demo, was clear about the problem this solves: a DJ walks into a club with a screen and has nothing to put on it.
+Built over a weekend at the Music Hackspace Lisbon hackathon (Algoriddim track, May 2026) with Calin, Bernardo, Guille, and Eugene. Drop-in TouchDesigner COMP, in-process Anthropic calls from TD's bundled Python, React + WebSocket iPad controller, optional djay Pro signal routings (BPM-locked LFOs, beat envelopes, bass-driven modulation). After the demo, Richie Hawtin pointed at the use case that mattered: a DJ walks into a club with a screen and has nothing to put on it.
 
 Next: get much sharper at reading TouchDesigner scenes (this is the limit on real scenes, not the UI generation), teach the model the wiring idioms DJ visual artists already use, and extend the signal source from djay Pro to Beat Link Trigger so this works in any CDJ booth.
 
