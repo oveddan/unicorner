@@ -19,34 +19,46 @@ Most "AI generates a UI" work treats the UI as the output. Unicorner treats the 
 
 ## How it works
 
-Three layers. The music flows down the left spine (A → B → visuals). The unique part is the loop on the right: Layer B publishes a machine-readable parameter catalog, an LLM turns it into a controller spec, and the rendered UI writes back into the same visual modules over WebSocket. Swap the scene → new catalog → AI regenerates the controller.
+The DJ loads a TouchDesigner scene. The AI reads what's in it. A controller built for that scene appears on the iPad. The DJ plays it.
+
+```mermaid
+flowchart LR
+    A["🎨 load any<br/>TouchDesigner scene"]
+    B["🤖 AI reads<br/>what's in it"]
+    C["📱 controller appears<br/>on your iPad"]
+    D["🎧 play visuals<br/>like an instrument"]
+
+    A --> B --> C --> D
+    D -.->|swap the scene| A
+```
+
+Under the hood, three layers. Music flows down the left spine (A → B → visuals). The unique part is the loop on the right: Layer B publishes a machine-readable parameter catalog, an LLM turns it into a controller spec, and the rendered UI writes back into the same visual modules over WebSocket. Optional *routings* — emitted by the AI alongside the controls — wire djay signals straight into scene params with the right modulation shape (direct, BPM-locked LFO, beat envelope, bar reset). Swap the scene → new catalog → AI regenerates the controller.
 
 ```mermaid
 flowchart TD
-    subgraph A["Layer A — signals"]
-        djay["djay Pro"]
-        audio["audio feature<br/>extraction"]
-        tdA["TouchDesigner<br/>BPM · stems · EQ · FX · cues"]
-        djay --> tdA
-        audio --> tdA
+    subgraph A["Layer A — music signals"]
+        djay["djay Pro<br/>BPM · beat · stems · EQ · FX"]
     end
 
     subgraph B["Layer B — visual scene"]
-        modules["generic visual modules<br/>intensity · color · density · decay"]
+        modules["parameter-tagged<br/>visual modules"]
         catalog[("parameter catalog<br/>JSON")]
         modules -->|exposes| catalog
     end
 
-    subgraph C["Layer C — AI-generated controller"]
-        llm{{"LLM (Claude)"}}
-        spec[("ControllerSpec<br/>JSON")]
-        ui["live web UI<br/>knobs · pads · macros"]
-        llm --> spec --> ui
+    subgraph C["Layer C — unicorner_controller.tox"]
+        gen["in-TD generator<br/>Python · Anthropic API"]
+        ws["Web Server DAT<br/>:9980"]
+        gen -->|ControllerSpec| ws
     end
 
-    tdA -->|drives| modules
-    catalog -->|prompt| llm
-    ui -->|WebSocket writes| modules
+    ipad["📱 iPad — React controller<br/>knobs · pads · chat · MIDI learn"]
+
+    djay -->|drives| modules
+    djay -.->|"optional routings:<br/>direct · LFO · beat envelope"| modules
+    catalog -->|prompt| gen
+    ws <-->|WebSocket| ipad
+    ipad -->|param writes| modules
 ```
 
 No Node bridge. No MCP at runtime. No `pip install`. The generator calls Anthropic directly from TouchDesigner's bundled Python; everything is bundled in a single `.tox`.
